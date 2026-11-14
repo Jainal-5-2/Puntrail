@@ -1,12 +1,37 @@
-import { Link } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from 'react-native';
+import { Link, router } from 'expo-router';
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useColorScheme,
+  Alert,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { downloadCemeteryData } from '@/lib/sync/download';
 
 export default function HomeScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  async function handleDownload() {
+    setIsDownloading(true);
+    try {
+      await downloadCemeteryData();
+      Alert.alert('Success', 'Cemetery data downloaded and cached locally.');
+    } catch (error) {
+      Alert.alert('Download failed', error instanceof Error ? error.message : 'Unknown error');
+    } finally {
+      setIsDownloading(false);
+    }
+  }
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
@@ -55,6 +80,31 @@ export default function HomeScreen() {
                 </Text>
               </Pressable>
             </Link>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>System (Dev)</Text>
+            <Pressable
+              onPress={handleDownload}
+              disabled={isDownloading}
+              style={({ pressed }) => [
+                styles.card,
+                {
+                  backgroundColor: pressed ? colors.backgroundSelected : colors.backgroundElement,
+                  borderColor: colors.border,
+                },
+              ]}>
+              {isDownloading ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <Text style={[styles.cardTitle, { color: colors.primary }]}>
+                  Download Data
+                </Text>
+              )}
+              <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+                Fetch latest records from Supabase
+              </Text>
+            </Pressable>
           </View>
 
           <View style={styles.section}>
