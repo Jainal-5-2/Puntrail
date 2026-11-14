@@ -1,5 +1,5 @@
 import { Link, router } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -14,6 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { downloadCemeteryData } from '@/lib/sync/download';
+import { downloadOfflineMap, getOfflineMapStatus } from '@/lib/map/offline';
+import { getDb, listCemeteries } from '@/lib/db';
 import { useAuth } from '@/stores/auth';
 
 export default function HomeScreen() {
@@ -22,6 +24,21 @@ export default function HomeScreen() {
 
   const { role } = useAuth();
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isDownloadingMap, setIsDownloadingMap] = useState(false);
+  const [hasOfflineMap, setHasOfflineMap] = useState(false);
+  const [cemeteryId, setCemeteryId] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const db = await getDb();
+      const cemeteries = await listCemeteries(db);
+      if (cemeteries.length > 0) {
+        setCemeteryId(cemeteries[0].id);
+        const status = await getOfflineMapStatus(cemeteries[0].id);
+        setHasOfflineMap(status);
+      }
+    })();
+  }, [isDownloadingMap]); // Re-check status when download finishes
 
   async function handleDownload() {
     setIsDownloading(true);
@@ -32,6 +49,23 @@ export default function HomeScreen() {
       Alert.alert('Download failed', error instanceof Error ? error.message : 'Unknown error');
     } finally {
       setIsDownloading(false);
+    }
+  }
+
+  async function handleDownloadMap() {
+    if (!cemeteryId) {
+      Alert.alert('No Data', 'Download cemetery data first.');
+      return;
+    }
+    
+    setIsDownloadingMap(true);
+    try {
+      await downloadOfflineMap(cemeteryId);
+      Alert.alert('Success', 'Offline map downloaded. You can now view the map without internet.');
+    } catch (error) {
+      Alert.alert('Map Download failed', error instanceof Error ? error.message : 'Unknown error');
+    } finally {
+      setIsDownloadingMap(false);
     }
   }
 
@@ -129,6 +163,29 @@ export default function HomeScreen() {
                 Fetch latest records from Supabase
               </Text>
             </Pressable>
+
+            <Pressable
+              onPress={handleDownloadMap}
+              disabled={isDownloadingMap || !cemeteryId}
+              style={({ pressed }) => [
+                styles.card,
+                {
+                  backgroundColor: pressed ? colors.backgroundSelected : colors.backgroundElement,
+                  borderColor: colors.border,
+                  opacity: cemeteryId ? 1 : 0.5,
+                },
+              ]}>
+              {isDownloadingMap ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <Text style={[styles.cardTitle, { color: colors.primary }]}>
+                  {hasOfflineMap ? 'Re-download Offline Map' : 'Download Offline Map'}
+                </Text>
+              )}
+              <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+                Cache map tiles for offline use
+              </Text>
+            </Pressable>
           </View>
 
           {role !== 'admin' && (
@@ -162,14 +219,10 @@ export default function HomeScreen() {
   );
 }
 
+// styles unchanged from your previous version
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    alignItems: 'center',
-  },
+  safe: { flex: 1 },
+  scrollContent: { flexGrow: 1, alignItems: 'center' },
   container: {
     flex: 1,
     width: '100%',
@@ -178,29 +231,11 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.five,
     gap: Spacing.five,
   },
-  hero: {
-    gap: Spacing.two,
-    paddingTop: Spacing.five,
-  },
-  title: {
-    fontSize: 40,
-    fontWeight: '700',
-    letterSpacing: -1,
-  },
-  subtitle: {
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  section: {
-    gap: Spacing.two,
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: Spacing.one,
-  },
+  hero: { gap: Spacing.two, paddingTop: Spacing.five },
+  title: { fontSize: 40, fontWeight: '700', letterSpacing: -1 },
+  subtitle: { fontSize: 16, lineHeight: 22 },
+  section: { gap: Spacing.two },
+  sectionTitle: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: Spacing.one },
   card: {
     paddingVertical: Spacing.three,
     paddingHorizontal: Spacing.four,
@@ -208,18 +243,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     gap: Spacing.one,
   },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  cardSubtitle: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  footer: {
-    fontSize: 11,
-    textAlign: 'center',
-    marginTop: 'auto',
-    paddingTop: Spacing.four,
-  },
+  cardTitle: { fontSize: 16, fontWeight: '600' },
+  cardSubtitle: { fontSize: 13, lineHeight: 18 },
+  footer: { fontSize: 11, textAlign: 'center', marginTop: 'auto', paddingTop: Spacing.four },
 });

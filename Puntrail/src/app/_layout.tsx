@@ -6,6 +6,7 @@ import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/stores/auth';
+import { useNetwork } from '@/stores/network';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -15,10 +16,12 @@ export default function RootLayout() {
   const colors = Colors[isDark ? 'dark' : 'light'];
 
   const { role, isInitializing, initialize } = useAuth();
+  const initializeNetwork = useNetwork((state) => state.initialize); // Get the network initializer
 
   useEffect(() => {
     void initialize();
-  }, [initialize]);
+    initializeNetwork(); // Start listening to connectivity changes
+  }, [initialize, initializeNetwork]);
 
   useEffect(() => {
     if (!isInitializing) {
@@ -35,7 +38,7 @@ export default function RootLayout() {
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
-          headerShown: false, // This is the default for most screens
+          headerShown: false,
           headerStyle: {
             backgroundColor: colors.background,
           },
@@ -49,7 +52,6 @@ export default function RootLayout() {
         <Stack.Screen name="search" />
         <Stack.Screen name="map" />
         
-        {/* Individual screen options override the global ones */}
         <Stack.Screen 
           name="admin/login" 
           options={{ 

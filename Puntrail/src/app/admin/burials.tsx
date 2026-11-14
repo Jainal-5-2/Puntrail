@@ -10,9 +10,11 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { getDb, listCemeteries, listAllBurials, updateBurialStatus } from '@/lib/db';
+import { queueBurialUpdate } from '@/lib/sync/upload';
 import type { CachedBurial, BurialStatus } from '@/types';
 
 export default function AdminBurialsScreen() {
@@ -55,9 +57,14 @@ export default function AdminBurialsScreen() {
     
     try {
       const db = await getDb();
+      
+      // 1. Update local SQLite immediately (Optimistic UI)
       await updateBurialStatus(db, burial.id, newStatus);
       
-      // Update local state without re-fetching everything
+      // 2. Queue the change for Supabase sync
+      await queueBurialUpdate(burial.id, newStatus, burial.version);
+      
+      // 3. Update UI state
       setBurials((prev) =>
         prev.map((b) => (b.id === burial.id ? { ...b, status: newStatus } : b))
       );
