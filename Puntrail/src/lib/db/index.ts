@@ -30,8 +30,11 @@ export {
 export {
   normalizeName,
   searchBurials,
+  listAllBurials,
   listBurialsByPlot,
   getBurialById,
+  createBurial,
+  updateBurialStatus,
   upsertBurial,
   deleteBurial,
   countBurialsByCemetery,

@@ -1,7 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-
 import type { Burial, BurialSearchResult, BurialStatus, CachedBurial } from '@/types';
-
 import { isFtsAvailable } from './client';
 
 interface BurialRow {
@@ -85,7 +83,7 @@ export async function searchBurials(
   if (normalized.length === 0) return [];
 
   if (isFtsAvailable()) {
-    const ftsQuery = `${normalized.replace(/["]/g, '""')}*`;
+    const ftsQuery = `"${normalized.replace(/"/g, '""')}"*`;
     const sql = SEARCH_SQL.replace(
       '__MATCH__',
       `b.rowid IN (SELECT rowid FROM burial_search WHERE burial_search MATCH ?)`,
@@ -109,6 +107,20 @@ export async function searchBurials(
   return rows;
 }
 
+export async function listAllBurials(
+  db: SQLiteDatabase,
+  cemeteryId: string,
+): Promise<CachedBurial[]> {
+  const rows = await db.getAllAsync<BurialRow>(
+    `SELECT b.* FROM burials b
+     JOIN plots p ON p.id = b.plot_id
+     WHERE p.cemetery_id = ?
+     ORDER BY b.full_name ASC`,
+    cemeteryId,
+  );
+  return rows.map(rowToBurial);
+}
+
 export async function listBurialsByPlot(
   db: SQLiteDatabase,
   plotId: string,
@@ -126,6 +138,42 @@ export async function getBurialById(
 ): Promise<CachedBurial | null> {
   const row = await db.getFirstAsync<BurialRow>('SELECT * FROM burials WHERE id = ?', id);
   return row ? rowToBurial(row) : null;
+}
+
+export async function createBurial(db: SQLiteDatabase, burial: Burial): Promise<void> {
+  const normalized = burial.name_normalized ?? normalizeName(burial.full_name);
+
+  await db.runAsync(
+    `INSERT INTO burials (
+       id, plot_id, full_name, name_normalized,
+       date_of_death, date_of_burial, age_at_death,
+       status, version, synced_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    burial.id,
+    burial.plot_id,
+    burial.full_name,
+    normalized,
+    burial.date_of_death,
+    burial.date_of_burial,
+    burial.age_at_death,
+    burial.status,
+    burial.version,
+    new Date().toISOString(),
+  );
+}
+
+export async function updateBurialStatus(
+  db: SQLiteDatabase,
+  id: string,
+  status: BurialStatus,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE burials SET status = ?, synced_at = ? WHERE id = ?',
+    status,
+    new Date().toISOString(),
+    id,
+  );
 }
 
 export async function upsertBurial(db: SQLiteDatabase, burial: Burial): Promise<void> {

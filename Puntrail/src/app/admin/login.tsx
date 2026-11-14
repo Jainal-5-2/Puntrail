@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { router, Stack } from 'expo-router';
+import { useRef, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -21,171 +21,191 @@ export default function AdminLoginScreen() {
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const insets = useSafeAreaInsets();
 
-  const { signIn, isSigningIn, error, clearError } = useAuth();
+  const { signIn, isSigningIn, error, clearError, role } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false); // NEW STATE
   const passwordRef = useRef<TextInputInstance>(null);
 
   const canSubmit = email.trim().length > 0 && password.length > 0 && !isSigningIn;
 
-  async function handleSubmit() {
-    if (!canSubmit) return;
-    const ok = await signIn(email.trim(), password);
-    if (ok) {
+  // Wait for the role to update before routing
+  useEffect(() => {
+    if (role === 'admin') {
       router.replace('/admin');
     }
+  }, [role]);
+
+  async function handleSubmit() {
+    if (!canSubmit) return;
+    await signIn(email.trim(), password);
   }
 
   return (
-    <SafeAreaView
-      style={[styles.safe, { backgroundColor: colors.background }]}
-      edges={['bottom']}>
-      <ScrollView
-        style={styles.flex}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: insets.bottom + Spacing.five },
-        ]}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <Text style={[styles.title, { color: colors.text }]}>Admin sign in</Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              Authorized cemetery personnel only
-            </Text>
-          </View>
-
-          <View style={styles.form}>
-            <View style={styles.field}>
-              <Text style={[styles.label, { color: colors.textSecondary }]}>Email</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    color: colors.text,
-                    backgroundColor: colors.backgroundElement,
-                    borderColor: colors.border,
-                  },
-                ]}
-                value={email}
-                onChangeText={(text) => {
-                  if (error) clearError();
-                  setEmail(text);
-                }}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                textContentType="emailAddress"
-                autoComplete="email"
-                enterKeyHint="next"
-                returnKeyType="next"
-                editable={!isSigningIn}
-                placeholder="admin@example.com"
-                placeholderTextColor={colors.textSecondary}
-                onSubmitEditing={() => passwordRef.current?.focus()}
-                submitBehavior="submit"
-              />
+    <>
+      {/* Override the native header styles for dark mode */}
+      <Stack.Screen 
+        options={{ 
+          headerStyle: { backgroundColor: colors.background },
+          headerTintColor: colors.text,
+          headerShadowVisible: false, // Optional: removes the bottom border line
+        }} 
+      />
+      <SafeAreaView
+        style={[styles.safe, { backgroundColor: colors.background }]}
+        edges={['bottom']}>
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: insets.bottom + Spacing.five },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}>
+          <View style={styles.container}>
+            <View style={styles.header}>
+              <Text style={[styles.title, { color: colors.text }]}>Admin sign in</Text>
+              <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+                Authorized cemetery personnel only
+              </Text>
             </View>
 
-            <View style={styles.field}>
-              <Text style={[styles.label, { color: colors.textSecondary }]}>Password</Text>
-              <TextInput
-                ref={passwordRef}
-                style={[
-                  styles.input,
-                  {
-                    color: colors.text,
-                    backgroundColor: colors.backgroundElement,
-                    borderColor: colors.border,
-                  },
-                ]}
-                value={password}
-                onChangeText={(text) => {
-                  if (error) clearError();
-                  setPassword(text);
-                }}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType="password"
-                autoComplete="password"
-                enterKeyHint="go"
-                returnKeyType="go"
-                editable={!isSigningIn}
-                placeholder="••••••••"
-                placeholderTextColor={colors.textSecondary}
-                onSubmitEditing={handleSubmit}
-              />
-            </View>
+            <View style={styles.form}>
+              <View style={styles.field}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>Email</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      color: colors.text,
+                      backgroundColor: colors.backgroundElement,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                  value={email}
+                  onChangeText={(text) => {
+                    if (error) clearError();
+                    setEmail(text);
+                  }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  textContentType="emailAddress"
+                  autoComplete="email"
+                  enterKeyHint="next"
+                  returnKeyType="next"
+                  editable={!isSigningIn}
+                  placeholder="admin@example.com"
+                  placeholderTextColor={colors.textSecondary}
+                  onSubmitEditing={() => passwordRef.current?.focus()}
+                  submitBehavior="submit"
+                />
+              </View>
 
-            {error ? (
-              <View
-                style={[
-                  styles.errorBanner,
+              <View style={styles.field}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>Password</Text>
+                <View style={styles.passwordContainer}>
+                  <TextInput
+                    ref={passwordRef}
+                    style={[
+                      styles.input,
+                      styles.passwordInput,
+                      {
+                        color: colors.text,
+                        backgroundColor: colors.backgroundElement,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                    value={password}
+                    onChangeText={(text) => {
+                      if (error) clearError();
+                      setPassword(text);
+                    }}
+                    secureTextEntry={!showPassword} // Toggles visibility
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType="password"
+                    autoComplete="password"
+                    enterKeyHint="go"
+                    returnKeyType="go"
+                    editable={!isSigningIn}
+                    placeholder="••••••••"
+                    placeholderTextColor={colors.textSecondary}
+                    onSubmitEditing={handleSubmit}
+                  />
+                  <Pressable 
+                    onPress={() => setShowPassword(!showPassword)}
+                    hitSlop={10}
+                    style={styles.showPasswordButton}
+                  >
+                    <Text style={[styles.showPasswordText, { color: colors.primary }]}>
+                      {showPassword ? 'Hide' : 'Show'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {error ? (
+                <View
+                  style={[
+                    styles.errorBanner,
+                    {
+                      backgroundColor:
+                        scheme === 'dark' ? 'rgba(248, 81, 73, 0.12)' : 'rgba(207, 34, 46, 0.08)',
+                      borderColor: colors.danger,
+                    },
+                  ]}>
+                  <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
+                </View>
+              ) : null}
+
+              <Pressable
+                onPress={handleSubmit}
+                disabled={!canSubmit}
+                android_ripple={{ color: colors.primaryText, borderless: false }}
+                style={({ pressed }) => [
+                  styles.submit,
                   {
-                    backgroundColor:
-                      scheme === 'dark' ? 'rgba(248, 81, 73, 0.12)' : 'rgba(207, 34, 46, 0.08)',
-                    borderColor: colors.danger,
+                    backgroundColor: canSubmit ? colors.primary : colors.backgroundSelected,
+                    opacity: pressed && !canSubmit ? 0.7 : 1,
                   },
                 ]}>
-                <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
-              </View>
-            ) : null}
+                {isSigningIn ? (
+                  <ActivityIndicator color={colors.primaryText} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.submitText,
+                      { color: canSubmit ? colors.primaryText : colors.textSecondary },
+                    ]}>
+                    Sign in
+                  </Text>
+                )}
+              </Pressable>
+            </View>
 
-            <Pressable
-              onPress={handleSubmit}
-              disabled={!canSubmit}
-              android_ripple={{ color: colors.primaryText, borderless: false }}
-              style={({ pressed }) => [
-                styles.submit,
-                {
-                  backgroundColor: canSubmit ? colors.primary : colors.backgroundSelected,
-                  opacity: pressed && !canSubmit ? 0.7 : 1,
-                },
-              ]}>
-              {isSigningIn ? (
-                <ActivityIndicator color={colors.primaryText} />
-              ) : (
-                <Text
-                  style={[
-                    styles.submitText,
-                    { color: canSubmit ? colors.primaryText : colors.textSecondary },
-                  ]}>
-                  Sign in
-                </Text>
-              )}
-            </Pressable>
+            <View style={styles.footer}>
+              <Pressable
+                onPress={() => router.back()}
+                android_ripple={{ color: colors.border, borderless: true }}
+                hitSlop={Spacing.two}
+                style={styles.backButton}>
+                <Text style={[styles.backText, { color: colors.primary }]}>Return to home</Text>
+              </Pressable>
+            </View>
           </View>
-
-          <View style={styles.footer}>
-            <Pressable
-              onPress={() => router.back()}
-              android_ripple={{ color: colors.border, borderless: true }}
-              hitSlop={Spacing.two}
-              style={styles.backButton}>
-              <Text style={[styles.backText, { color: colors.primary }]}>Return to home</Text>
-            </Pressable>
-          </View>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </SafeAreaView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-  },
-  flex: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    alignItems: 'center',
-  },
+  safe: { flex: 1 },
+  flex: { flex: 1 },
+  scrollContent: { flexGrow: 1, alignItems: 'center' },
   container: {
     flex: 1,
     width: '100%',
@@ -194,30 +214,12 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.five,
     gap: Spacing.five,
   },
-  header: {
-    gap: Spacing.two,
-  },
-  title: {
-    fontSize: 30,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 15,
-    lineHeight: 21,
-  },
-  form: {
-    gap: Spacing.three,
-  },
-  field: {
-    gap: Spacing.one,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
+  header: { gap: Spacing.two },
+  title: { fontSize: 30, fontWeight: '700', letterSpacing: -0.5 },
+  subtitle: { fontSize: 15, lineHeight: 21 },
+  form: { gap: Spacing.three },
+  field: { gap: Spacing.one },
+  label: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8 },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.md,
@@ -226,16 +228,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     minHeight: 48,
   },
+  // New styles for password box
+  passwordContainer: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  passwordInput: {
+    paddingRight: 60, // Make room for the "Show" button
+  },
+  showPasswordButton: {
+    position: 'absolute',
+    right: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  showPasswordText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
   errorBanner: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.md,
     paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.three,
   },
-  errorText: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
+  errorText: { fontSize: 14, lineHeight: 20 },
   submit: {
     borderRadius: Radius.md,
     alignItems: 'center',
@@ -244,23 +260,8 @@ const styles = StyleSheet.create({
     marginTop: Spacing.two,
     overflow: 'hidden',
   },
-  submitText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  footer: {
-    marginTop: 'auto',
-    paddingTop: Spacing.five,
-    alignItems: 'center',
-  },
-  backButton: {
-    paddingVertical: Spacing.three,
-    paddingHorizontal: Spacing.four,
-    minHeight: 48,
-    justifyContent: 'center',
-  },
-  backText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  submitText: { fontSize: 16, fontWeight: '600' },
+  footer: { marginTop: 'auto', paddingTop: Spacing.five, alignItems: 'center' },
+  backButton: { paddingVertical: Spacing.three, paddingHorizontal: Spacing.four, minHeight: 48, justifyContent: 'center' },
+  backText: { fontSize: 14, fontWeight: '500' },
 });

@@ -14,11 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { downloadCemeteryData } from '@/lib/sync/download';
+import { useAuth } from '@/stores/auth';
 
 export default function HomeScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
+  const { role } = useAuth();
   const [isDownloading, setIsDownloading] = useState(false);
 
   async function handleDownload() {
@@ -45,6 +47,28 @@ export default function HomeScreen() {
               Cemetery mapping and burial information for Isabela City, Basilan
             </Text>
           </View>
+
+          {role === 'admin' && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: colors.primary }]}>Admin Session Active</Text>
+              <Link href="/admin" asChild>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.card,
+                    {
+                      backgroundColor: pressed ? colors.backgroundSelected : colors.backgroundElement,
+                      borderColor: colors.primary,
+                      borderWidth: 2,
+                    },
+                  ]}>
+                  <Text style={[styles.cardTitle, { color: colors.primary }]}>Return to Dashboard</Text>
+                  <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+                    Go back to the admin management panel
+                  </Text>
+                </Pressable>
+              </Link>
+            </View>
+          )}
 
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Visitor</Text>
@@ -107,25 +131,27 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Administrator</Text>
+          {role !== 'admin' && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Administrator</Text>
 
-            <Link href="/admin/login" asChild>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.card,
-                  {
-                    backgroundColor: pressed ? colors.backgroundSelected : colors.backgroundElement,
-                    borderColor: colors.border,
-                  },
-                ]}>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Admin sign in</Text>
-                <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-                  Manage cemeteries, plots, and burial records
-                </Text>
-              </Pressable>
-            </Link>
-          </View>
+              <Link href="/admin/login" asChild>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.card,
+                    {
+                      backgroundColor: pressed ? colors.backgroundSelected : colors.backgroundElement,
+                      borderColor: colors.border,
+                    },
+                  ]}>
+                  <Text style={[styles.cardTitle, { color: colors.text }]}>Admin sign in</Text>
+                  <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+                    Manage cemeteries, plots, and burial records
+                  </Text>
+                </Pressable>
+              </Link>
+            </View>
+          )}
 
           <Text style={[styles.footer, { color: colors.textSecondary }]}>
             Map data © MapTiler / OpenStreetMap contributors
