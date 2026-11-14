@@ -1,98 +1,149 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import { Link } from 'expo-router';
+import { Pressable, ScrollView, StyleSheet, Text, View, useColorScheme } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 
 export default function HomeScreen() {
+  const scheme = useColorScheme();
+  const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}>
+        <View style={styles.container}>
+          <View style={styles.hero}>
+            <Text style={[styles.title, { color: colors.text }]}>Puntrail</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+              Cemetery mapping and burial information for Isabela City, Basilan
+            </Text>
+          </View>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Visitor</Text>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+            <Link href="/search" asChild>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.card,
+                  {
+                    backgroundColor: pressed ? colors.backgroundSelected : colors.backgroundElement,
+                    borderColor: colors.border,
+                  },
+                ]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Find a burial</Text>
+                <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+                  Search by name and view the plot on the map
+                </Text>
+              </Pressable>
+            </Link>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+            <Link href="/map" asChild>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.card,
+                  {
+                    backgroundColor: pressed ? colors.backgroundSelected : colors.backgroundElement,
+                    borderColor: colors.border,
+                  },
+                ]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>View cemetery map</Text>
+                <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+                  Explore the mapped cemetery and plots
+                </Text>
+              </Pressable>
+            </Link>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Administrator</Text>
+
+            <Link href="/admin/login" asChild>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.card,
+                  {
+                    backgroundColor: pressed ? colors.backgroundSelected : colors.backgroundElement,
+                    borderColor: colors.border,
+                  },
+                ]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Admin sign in</Text>
+                <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+                  Manage cemeteries, plots, and burial records
+                </Text>
+              </Pressable>
+            </Link>
+          </View>
+
+          <Text style={[styles.footer, { color: colors.textSecondary }]}>
+            Map data © MapTiler / OpenStreetMap contributors
+          </Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+  },
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
+    width: '100%',
     maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
     paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+    paddingVertical: Spacing.five,
+    gap: Spacing.five,
+  },
+  hero: {
+    gap: Spacing.two,
+    paddingTop: Spacing.five,
   },
   title: {
-    textAlign: 'center',
+    fontSize: 40,
+    fontWeight: '700',
+    letterSpacing: -1,
   },
-  code: {
+  subtitle: {
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  section: {
+    gap: Spacing.two,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
     textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: Spacing.one,
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  card: {
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: Spacing.one,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cardSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  footer: {
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 'auto',
+    paddingTop: Spacing.four,
   },
 });
