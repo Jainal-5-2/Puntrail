@@ -24,34 +24,51 @@ interface SupabasePlotRow {
 export async function downloadCemeteryData(): Promise<void> {
   const db = await getDb();
 
-  // 1. Fetch Cemeteries
+  // ── 1. Cemeteries ──
   const { data: cemeteries, error: cemError } = await supabase
     .from('cemeteries')
     .select('*');
 
   if (cemError) throw new Error(`Failed to fetch cemeteries: ${cemError.message}`);
-  if (!cemeteries) return;
+  
+  if (cemeteries) {
+    const remoteIds = cemeteries.map((r) => r.id);
+    
+    // Upsert remote data
+    for (const row of cemeteries) {
+      const cemetery: Cemetery = {
+        id: row.id,
+        name: row.name,
+        location: row.location,
+        boundary: null,
+        notes: row.notes,
+        version: row.version,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+      await upsertCemetery(db, cemetery);
+    }
 
-  for (const row of cemeteries) {
-    const cemetery: Cemetery = {
-      id: row.id,
-      name: row.name,
-      location: row.location,
-      boundary: null, // Skipping boundary for now to keep download simple
-      notes: row.notes,
-      version: row.version,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    };
-    await upsertCemetery(db, cemetery);
+    // Delete local rows that no longer exist on the server
+    if (remoteIds.length > 0) {
+      const placeholders = remoteIds.map(() => '?').join(',');
+      await db.runAsync(
+        `DELETE FROM cemeteries WHERE id NOT IN (${placeholders})`,
+        ...remoteIds
+      );
+    } else {
+      await db.runAsync(`DELETE FROM cemeteries`);
+    }
   }
 
-  // 2. Fetch Sections
+  // ── 2. Sections ──
   const { data: sections, error: secError } = await supabase
     .from('sections')
     .select('*');
   
   if (!secError && sections) {
+    const remoteIds = sections.map((r) => r.id);
+
     for (const row of sections) {
       const section: Section = {
         id: row.id,
@@ -64,14 +81,27 @@ export async function downloadCemeteryData(): Promise<void> {
       };
       await upsertSection(db, section);
     }
+
+    if (remoteIds.length > 0) {
+      const placeholders = remoteIds.map(() => '?').join(',');
+      await db.runAsync(
+        `DELETE FROM sections WHERE id NOT IN (${placeholders})`,
+        ...remoteIds
+      );
+    } else {
+      await db.runAsync(`DELETE FROM sections`);
+    }
   }
 
-  // 3. Fetch Plots (using PostGIS ST_AsGeoJSON)
+  // ── 3. Plots ──
   const { data: plots, error: plotError } = await supabase
-    .rpc('get_plots_as_geojson'); // We will create this RPC below
+    .rpc('get_plots_as_geojson');
 
   if (plotError) throw new Error(`Failed to fetch plots: ${plotError.message}`);
+  
   if (plots) {
+    const remoteIds = (plots as SupabasePlotRow[]).map((r) => r.id);
+
     for (const row of plots as SupabasePlotRow[]) {
       const plot: Plot = {
         id: row.id,
@@ -87,15 +117,28 @@ export async function downloadCemeteryData(): Promise<void> {
       };
       await upsertPlot(db, plot);
     }
+
+    if (remoteIds.length > 0) {
+      const placeholders = remoteIds.map(() => '?').join(',');
+      await db.runAsync(
+        `DELETE FROM plots WHERE id NOT IN (${placeholders})`,
+        ...remoteIds
+      );
+    } else {
+      await db.runAsync(`DELETE FROM plots`);
+    }
   }
 
-  // 4. Fetch Burials
+  // ── 4. Burials ──
   const { data: burials, error: burialError } = await supabase
     .from('burials')
     .select('*');
 
   if (burialError) throw new Error(`Failed to fetch burials: ${burialError.message}`);
+  
   if (burials) {
+    const remoteIds = burials.map((r) => r.id);
+
     for (const row of burials) {
       const burial: Burial = {
         id: row.id,
@@ -105,13 +148,22 @@ export async function downloadCemeteryData(): Promise<void> {
         date_of_death: row.date_of_death,
         date_of_burial: row.date_of_burial,
         age_at_death: row.age_at_death,
-        notes: row.notes,
         status: row.status,
         version: row.version,
         created_at: row.created_at,
         updated_at: row.updated_at,
       };
       await upsertBurial(db, burial);
+    }
+
+    if (remoteIds.length > 0) {
+      const placeholders = remoteIds.map(() => '?').join(',');
+      await db.runAsync(
+        `DELETE FROM burials WHERE id NOT IN (${placeholders})`,
+        ...remoteIds
+      );
+    } else {
+      await db.runAsync(`DELETE FROM burials`);
     }
   }
 }

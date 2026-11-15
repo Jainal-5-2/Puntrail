@@ -33,6 +33,7 @@ import {
   queueBurialUpdate,
   queueBurialDelete,
 } from '@/lib/sync/upload';
+import { runAutoSync } from '@/lib/sync/autoSync';
 import type { CachedBurial, CachedPlot, Burial, BurialStatus } from '@/types';
 
 type ThemeColors = typeof Colors.light | typeof Colors.dark;
@@ -98,6 +99,7 @@ export default function AdminBurialsScreen() {
                 await queueBurialDelete(burial.id, burial.version);
               });
               setBurials((prev) => prev.filter((b) => b.id !== burial.id));
+              void runAutoSync();
             } catch (err) {
               Alert.alert(
                 'Delete failed',
@@ -382,6 +384,7 @@ function BurialEditorModal({
       }
 
       onClose();
+      void runAutoSync();
     } catch (err) {
       Alert.alert('Save failed', err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -559,8 +562,6 @@ function BurialEditorModal({
         </View>
       </KeyboardAvoidingView>
 
-      {/* Android pickers show as dialogs, iOS pickers show inline (or as a modal). 
-          We conditionally render them right at the bottom of the Modal. */}
       {showDeathPicker && (
         <DateTimePicker
           value={dateOfDeath || new Date()}

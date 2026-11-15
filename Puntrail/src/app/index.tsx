@@ -1,5 +1,5 @@
 import { Link, router } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -17,17 +17,23 @@ import { downloadCemeteryData } from '@/lib/sync/download';
 import { downloadOfflineMap, getOfflineMapStatus } from '@/lib/map/offline';
 import { getDb, listCemeteries } from '@/lib/db';
 import { useAuth } from '@/stores/auth';
+import { useNetwork } from '@/stores/network';
 
 export default function HomeScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
   const { role } = useAuth();
+  const { isInternetReachable } = useNetwork();
+  
   const [isDownloading, setIsDownloading] = useState(false);
   const [isDownloadingMap, setIsDownloadingMap] = useState(false);
   const [hasOfflineMap, setHasOfflineMap] = useState(false);
   const [cemeteryId, setCemeteryId] = useState<string | null>(null);
 
+  const hasDownloadedOnLaunch = useRef(false);
+
+  // Load local data status
   useEffect(() => {
     (async () => {
       const db = await getDb();
@@ -38,12 +44,44 @@ export default function HomeScreen() {
         setHasOfflineMap(status);
       }
     })();
-  }, [isDownloadingMap]); // Re-check status when download finishes
+  }, [isDownloadingMap]);
+
+  // Auto-download when network becomes available
+  useEffect(() => {
+    if (!isInternetReachable) return;
+
+    if (!hasDownloadedOnLaunch.current) {
+      hasDownloadedOnLaunch.current = true;
+      void handleSilentDownload();
+      return;
+    }
+
+    // Optional: If you want it to re-download every time the network drops and comes back,
+    // you can remove the `hasDownloadedOnLaunch` check above. For now, it only does it once per launch.
+  }, [isInternetReachable]);
+
+  async function handleSilentDownload() {
+    try {
+      await downloadCemeteryData();
+    } catch (error) {
+      console.warn('Background sync failed:', error);
+    }
+  }
 
   async function handleDownload() {
+    if (!isInternetReachable) {
+      Alert.alert('Offline', 'You need an internet connection to download data.');
+      return;
+    }
+    
     setIsDownloading(true);
     try {
       await downloadCemeteryData();
+      // Refresh local ID if it was the first download
+      const db = await getDb();
+      const cemeteries = await listCemeteries(db);
+      if (cemeteries.length > 0) setCemeteryId(cemeteries[0].id);
+      
       Alert.alert('Success', 'Cemetery data downloaded and cached locally.');
     } catch (error) {
       Alert.alert('Download failed', error instanceof Error ? error.message : 'Unknown error');
@@ -80,6 +118,12 @@ export default function HomeScreen() {
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               Cemetery mapping and burial information for Isabela City, Basilan
             </Text>
+            <View style={styles.statusRow}>
+               <View style={[styles.statusDot, { backgroundColor: isInternetReachable ? colors.success : colors.warning }]} />
+               <Text style={[styles.statusText, { color: colors.textSecondary }]}>
+                 {isInternetReachable ? 'Online - Data will sync automatically' : 'Offline - Showing cached data'}
+               </Text>
+            </View>
           </View>
 
           {role === 'admin' && (
@@ -156,7 +200,7 @@ export default function HomeScreen() {
                 <ActivityIndicator color={colors.primary} />
               ) : (
                 <Text style={[styles.cardTitle, { color: colors.primary }]}>
-                  Download Data
+                  Force Download Data
                 </Text>
               )}
               <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
@@ -219,7 +263,6 @@ export default function HomeScreen() {
   );
 }
 
-// styles unchanged from your previous version
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   scrollContent: { flexGrow: 1, alignItems: 'center' },
@@ -234,6 +277,9 @@ const styles = StyleSheet.create({
   hero: { gap: Spacing.two, paddingTop: Spacing.five },
   title: { fontSize: 40, fontWeight: '700', letterSpacing: -1 },
   subtitle: { fontSize: 16, lineHeight: 22 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, marginTop: Spacing.two },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { fontSize: 13 },
   section: { gap: Spacing.two },
   sectionTitle: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: Spacing.one },
   card: {

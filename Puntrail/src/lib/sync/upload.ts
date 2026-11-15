@@ -24,7 +24,46 @@ export async function processSyncQueue(): Promise<{ success: number; failed: num
         job.id
       );
 
-      if (job.entity_type === 'burial' && job.operation === 'update') {
+      // ── Burial: Insert ──
+      if (job.entity_type === 'burial' && job.operation === 'insert') {
+        const payload = JSON.parse(job.payload as unknown as string) as Burial;
+        const { data, error } = await supabase
+          .from('burials')
+          .insert({
+            id: payload.id,
+            plot_id: payload.plot_id,
+            full_name: payload.full_name,
+            name_normalized: payload.name_normalized,
+            date_of_death: payload.date_of_death,
+            date_of_burial: payload.date_of_burial,
+            age_at_death: payload.age_at_death,
+            status: payload.status,
+            version: payload.version,
+          })
+          .select('version')
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          await db.runAsync(
+            'UPDATE burials SET version = ?, synced_at = ? WHERE id = ?',
+            data.version,
+            new Date().toISOString(),
+            job.entity_id
+          );
+        }
+      }
+      // ── Burial: Delete ──
+      else if (job.entity_type === 'burial' && job.operation === 'delete') {
+        const { error } = await supabase
+          .from('burials')
+          .delete()
+          .eq('id', job.entity_id);
+
+        if (error) throw error;
+      }
+      // ── Burial: Update ──
+      else if (job.entity_type === 'burial' && job.operation === 'update') {
         const payload = JSON.parse(job.payload as unknown as string);
         const { data, error } = await supabase
           .from('burials')
@@ -43,6 +82,7 @@ export async function processSyncQueue(): Promise<{ success: number; failed: num
           );
         }
       } 
+      // ── Plot: Insert ──
       else if (job.entity_type === 'plot' && job.operation === 'insert') {
         const payload = JSON.parse(job.payload as unknown as string);
         const localPlot = await db.getFirstAsync<any>('SELECT * FROM plots WHERE id = ?', job.entity_id);
@@ -72,6 +112,7 @@ export async function processSyncQueue(): Promise<{ success: number; failed: num
           );
         }
       }
+      // ── Cemetery: Insert ──
       else if (job.entity_type === 'cemetery' && job.operation === 'insert') {
         const payload = JSON.parse(job.payload as unknown as string);
         
@@ -99,8 +140,7 @@ export async function processSyncQueue(): Promise<{ success: number; failed: num
       }
 
       await db.runAsync(
-        "UPDATE sync_queue SET status = 'synced', updated_at = ? WHERE id = ?",
-        new Date().toISOString(),
+        "DELETE FROM sync_queue WHERE id = ?",
         job.id
       );
       successCount++;

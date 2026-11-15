@@ -15,7 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useAuth } from '@/stores/auth';
 import { useNetwork } from '@/stores/network';
-import { processSyncQueue } from '@/lib/sync/upload';
+import { runAutoSync } from '@/lib/sync/autoSync';
+import { getDb } from '@/lib/db';
 
 export default function AdminDashboardScreen() {
   const scheme = useColorScheme();
@@ -36,21 +37,21 @@ export default function AdminDashboardScreen() {
       Alert.alert('Please wait', 'Still checking your network connection...');
       return;
     }
-    
+
     if (!isConnected) {
       Alert.alert('Offline', 'You need an internet connection to sync.');
       return;
     }
-    
+
     setIsSyncing(true);
     try {
-      const result = await processSyncQueue();
-      
-      if (result.success === 0 && result.failed === 0) {
+      const result = await runAutoSync();
+
+      if (!result) {
         Alert.alert('Sync Complete', 'No pending changes to upload.');
       } else if (result.failed > 0) {
         Alert.alert(
-          'Sync Failed', 
+          'Sync Completed with Errors',
           `${result.success} synced, ${result.failed} failed.\n\nReason:\n${result.errors.join('\n')}`
         );
       } else {

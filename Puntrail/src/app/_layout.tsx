@@ -1,12 +1,13 @@
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/stores/auth';
 import { useNetwork } from '@/stores/network';
+import { runAutoSync } from '@/lib/sync/autoSync';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -16,11 +17,14 @@ export default function RootLayout() {
   const colors = Colors[isDark ? 'dark' : 'light'];
 
   const { role, isInitializing, initialize } = useAuth();
-  const initializeNetwork = useNetwork((state) => state.initialize); // Get the network initializer
+  const initializeNetwork = useNetwork((state) => state.initialize);
+  const isInternetReachable = useNetwork((state) => state.isInternetReachable);
+
+  const hasSyncedOnLaunch = useRef(false);
 
   useEffect(() => {
     void initialize();
-    initializeNetwork(); // Start listening to connectivity changes
+    initializeNetwork();
   }, [initialize, initializeNetwork]);
 
   useEffect(() => {
@@ -28,6 +32,18 @@ export default function RootLayout() {
       void SplashScreen.hideAsync();
     }
   }, [isInitializing]);
+
+  useEffect(() => {
+    if (!isInternetReachable) return;
+
+    if (!hasSyncedOnLaunch.current) {
+      hasSyncedOnLaunch.current = true;
+      void runAutoSync();
+      return;
+    }
+
+    void runAutoSync();
+  }, [isInternetReachable]);
 
   if (isInitializing) {
     return null;
