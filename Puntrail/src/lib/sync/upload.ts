@@ -1,6 +1,8 @@
 import { getDb } from '@/lib/db';
 import { supabase } from '@/lib/supabase';
 import type { SyncQueueEntry } from '@/types';
+import * as Crypto from 'expo-crypto';
+import type { Burial } from '@/types';
 
 export async function processSyncQueue(): Promise<{ success: number; failed: number; errors: string[] }> {
   const db = await getDb();
@@ -80,7 +82,7 @@ export async function processSyncQueue(): Promise<{ success: number; failed: num
             name: payload.name,
             location: payload.location,
             notes: payload.notes,
-            boundary: null, // Update when we add boundary drawing
+            boundary: null,
           })
           .select('version')
           .single();
@@ -122,66 +124,83 @@ export async function processSyncQueue(): Promise<{ success: number; failed: num
 
 export async function queueBurialUpdate(burialId: string, status: string, baseVersion: number): Promise<void> {
   const db = await getDb();
-  const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-  
+  const now = new Date().toISOString();
   await db.runAsync(
     `INSERT INTO sync_queue (
        id, entity_type, entity_id, operation, payload, 
-       base_version, status, created_at, updated_at
+       base_version, status, attempts, created_at, updated_at
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    jobId,
-    'burial',
+     VALUES (?, 'burial', ?, 'update', ?, ?, 'pending', 0, ?, ?)`,
+    Crypto.randomUUID(),
     burialId,
-    'update',
     JSON.stringify({ status }),
     baseVersion,
-    'pending',
-    new Date().toISOString(),
-    new Date().toISOString()
+    now,
+    now
+  );
+}
+
+export async function queueBurialDelete(burialId: string, baseVersion: number): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO sync_queue
+       (id, entity_type, entity_id, operation, payload, base_version, status, attempts, created_at, updated_at)
+     VALUES (?, 'burial', ?, 'delete', ?, ?, 'pending', 0, ?, ?)`,
+    Crypto.randomUUID(),
+    burialId,
+    '{}',
+    baseVersion,
+    now,
+    now,
+  );
+}
+
+export async function queueBurialCreate(burialId: string, burial: Burial): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO sync_queue
+       (id, entity_type, entity_id, operation, payload, base_version, status, attempts, created_at, updated_at)
+     VALUES (?, 'burial', ?, 'insert', ?, 0, 'pending', 0, ?, ?)`,
+    Crypto.randomUUID(),
+    burialId,
+    JSON.stringify(burial),
+    now,
+    now,
   );
 }
 
 export async function queuePlotCreate(plotId: string, geometry: any, plotIdentifier: string): Promise<void> {
   const db = await getDb();
-  const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-  
+  const now = new Date().toISOString();
   await db.runAsync(
     `INSERT INTO sync_queue (
        id, entity_type, entity_id, operation, payload, 
-       base_version, status, created_at, updated_at
+       base_version, status, attempts, created_at, updated_at
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    jobId,
-    'plot',
+     VALUES (?, 'plot', ?, 'insert', ?, 0, 'pending', 0, ?, ?)`,
+    Crypto.randomUUID(),
     plotId,
-    'insert',
     JSON.stringify({ geometry, plot_identifier: plotIdentifier }),
-    0,
-    'pending',
-    new Date().toISOString(),
-    new Date().toISOString()
+    now,
+    now
   );
 }
 
 export async function queueCemeteryCreate(cemeteryId: string, data: any): Promise<void> {
   const db = await getDb();
-  const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-  
+  const now = new Date().toISOString();
   await db.runAsync(
     `INSERT INTO sync_queue (
        id, entity_type, entity_id, operation, payload, 
-       base_version, status, created_at, updated_at
+       base_version, status, attempts, created_at, updated_at
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    jobId,
-    'cemetery',
+     VALUES (?, 'cemetery', ?, 'insert', ?, 0, 'pending', 0, ?, ?)`,
+    Crypto.randomUUID(),
     cemeteryId,
-    'insert',
     JSON.stringify(data),
-    0,
-    'pending',
-    new Date().toISOString(),
-    new Date().toISOString()
+    now,
+    now
   );
 }

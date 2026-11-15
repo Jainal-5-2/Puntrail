@@ -64,7 +64,6 @@ export interface Burial {
   date_of_death: string | null;
   date_of_burial: string | null;
   age_at_death: string | null;
-  notes: string | null;
   status: BurialStatus;
   created_at: string;
   updated_at: string;

@@ -121,7 +121,6 @@ export async function listAllBurials(
   return rows.map(rowToBurial);
 }
 
-// FIX: Only return verified burials for the public map view
 export async function listBurialsByPlot(
   db: SQLiteDatabase,
   plotId: string,

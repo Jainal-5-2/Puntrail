@@ -70,3 +70,5 @@ export const Radius = {
 } as const;
 
 export const MaxContentWidth = 800;
+
+export type ThemeColors = (typeof Colors)['light'] | (typeof Colors)['dark'];
