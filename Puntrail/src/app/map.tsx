@@ -20,8 +20,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Colors, Radius, Spacing } from '@/constants/theme';
-import { getDb, listCemeteries, listPlotsByCemetery } from '@/lib/db';
-import type { CachedPlot } from '@/types';
+import { getDb, listCemeteries, listPlotsByCemetery, listBurialsByPlot } from '@/lib/db';
+import type { CachedPlot, CachedBurial } from '@/types';
 
 const MAP_STYLE = process.env.EXPO_PUBLIC_MAPTILER_STYLE_URL;
 const DEFAULT_CENTER: [number, number] = [121.9711, 6.7054];
@@ -30,12 +30,18 @@ export default function MapScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
-  const { plotId: paramPlotId } = useLocalSearchParams<{ plotId?: string }>();
+  const { plotId: paramPlotId, burialId: paramBurialId } = useLocalSearchParams<{ 
+    plotId?: string; 
+    burialId?: string 
+  }>();
 
   const [plots, setPlots] = useState<CachedPlot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // State for selected plot and its burials
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(paramPlotId || null);
+  const [selectedBurials, setSelectedBurials] = useState<CachedBurial[]>([]);
 
   const cameraRef = useRef<CameraRef>(null);
 
@@ -72,6 +78,31 @@ export default function MapScreen() {
     };
   }, []);
 
+  // Fetch burials when a plot is selected
+  useEffect(() => {
+    if (!selectedPlotId) {
+      setSelectedBurials([]);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const db = await getDb();
+        const burials = await listBurialsByPlot(db, selectedPlotId);
+        if (!cancelled) {
+          setSelectedBurials(burials);
+        }
+      } catch (err) {
+        console.error('Failed to load burials', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPlotId]);
+
   const geojson = useMemo(() => {
     return {
       type: 'FeatureCollection',
@@ -88,6 +119,7 @@ export default function MapScreen() {
     } as GeoJSON.FeatureCollection;
   }, [plots, selectedPlotId]);
 
+  // Center map on selected plot
   useEffect(() => {
     if (!paramPlotId || plots.length === 0 || !cameraRef.current) return;
 
@@ -223,18 +255,30 @@ export default function MapScreen() {
                 {selectedPlot.plot_identifier}
               </Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Status</Text>
-              <Text
-                style={[
-                  styles.infoValue,
-                  {
-                    color: selectedPlot.geometry_verified ? colors.success : colors.warning,
-                  },
-                ]}>
-                {selectedPlot.geometry_verified ? 'Verified' : 'Unverified'}
+            
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+            {selectedBurials.length === 0 ? (
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                No verified burials found in this plot.
               </Text>
-            </View>
+            ) : (
+              <View style={styles.burialList}>
+                {selectedBurials.map((b) => (
+                  <View key={b.id} style={styles.burialRow}>
+                    <Text style={[styles.burialName, { color: colors.text }]}>
+                      {b.full_name}
+                    </Text>
+                    {b.date_of_burial && (
+                      <Text style={[styles.burialDate, { color: colors.textSecondary }]}>
+                        Buried: {b.date_of_burial}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+
             <Pressable onPress={() => setSelectedPlotId(null)} style={styles.closeBtn}>
               <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Close</Text>
             </Pressable>
@@ -305,6 +349,28 @@ const styles = StyleSheet.create({
   },
   infoLabel: { fontSize: 14 },
   infoValue: { fontSize: 16, fontWeight: '600' },
+  divider: {
+    height: 1,
+    marginVertical: Spacing.two,
+  },
+  emptyText: {
+    fontSize: 14,
+    fontStyle: 'italic',
+    paddingVertical: Spacing.two,
+  },
+  burialList: {
+    gap: Spacing.two,
+  },
+  burialRow: {
+    gap: Spacing.half,
+  },
+  burialName: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  burialDate: {
+    fontSize: 13,
+  },
   closeBtn: {
     marginTop: Spacing.two,
     alignSelf: 'center',

@@ -16,10 +16,7 @@ export async function downloadOfflineMap(cemeteryId: string): Promise<void> {
     throw new Error('Cemetery not found locally.');
   }
 
-  // If the cemetery doesn't have a boundary polygon, we default to a small bounding box around Isabela City
-  // (This assumes you haven't drawn a polygon yet)
-  const defaultBbox: [number, number, number, number] = [121.9600, 6.7000, 121.9800, 6.7100]; // [west, south, east, north]
-  
+  const defaultBbox: [number, number, number, number] = [121.9600, 6.7000, 121.9800, 6.7100];
   let bounds: [number, number, number, number] = defaultBbox;
 
   if (cemetery.boundary && cemetery.boundary.type === 'Polygon') {
@@ -27,27 +24,38 @@ export async function downloadOfflineMap(cemeteryId: string): Promise<void> {
     const lngs = coords.map((c) => c[0]);
     const lats = coords.map((c) => c[1]);
     bounds = [
-      Math.min(...lngs), // west
-      Math.min(...lats), // south
-      Math.max(...lngs), // east
-      Math.max(...lats), // north
+      Math.min(...lngs),
+      Math.min(...lats),
+      Math.max(...lngs),
+      Math.max(...lats),
     ];
   }
 
-  // 1. Create the MapLibre Offline Pack
-  // Zoom levels 14 to 18 cover the cemetery perfectly.
-  const pack = await OfflineManager.createPack({
-    mapStyle: MAP_STYLE,
-    bounds: bounds,
-    minZoom: 14,
-    maxZoom: 18,
-    metadata: {
-      cemeteryId: cemetery.id,
-      name: cemetery.name,
-    },
+  // Wrap the download in a Promise that waits for the progress listener to hit 100%
+  await new Promise<void>((resolve, reject) => {
+    OfflineManager.createPack(
+      {
+        mapStyle: MAP_STYLE,
+        bounds: bounds,
+        minZoom: 14,
+        maxZoom: 18,
+        metadata: {
+          cemeteryId: cemetery.id,
+          name: cemetery.name,
+        },
+      },
+      (_pack, progress) => {
+        // progress.state can be 'complete' or 'inactive' when finished
+        if (progress.state === 'complete' || progress.percentage === 100) {
+          resolve();
+        }
+      },
+      (pack, error) => {
+        reject(new Error(`Map download failed: ${error.message}`));
+      }
+    );
   });
 
-  // 2. Save the pack info to SQLite so the app knows it's downloaded
   const packId = `pack_${cemetery.id}`;
   const bbox = bounds;
   
@@ -62,7 +70,7 @@ export async function downloadOfflineMap(cemeteryId: string): Promise<void> {
     packId,
     cemetery.id,
     `${cemetery.name} Offline Map`,
-    0, // MapLibre calculates size asynchronously via progress listener, we'll leave it 0 for now
+    0,
     bbox[0],
     bbox[1],
     bbox[2],

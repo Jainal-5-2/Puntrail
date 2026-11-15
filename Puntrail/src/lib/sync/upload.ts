@@ -24,8 +24,6 @@ export async function processSyncQueue(): Promise<{ success: number; failed: num
 
       if (job.entity_type === 'burial' && job.operation === 'update') {
         const payload = JSON.parse(job.payload as unknown as string);
-
-        // We just force the update by ID. Admin edits take precedence.
         const { data, error } = await supabase
           .from('burials')
           .update({ status: payload.status })
@@ -33,14 +31,64 @@ export async function processSyncQueue(): Promise<{ success: number; failed: num
           .select('version')
           .single();
 
-        if (error) {
-          throw error;
-        }
-
+        if (error) throw error;
         if (data) {
-          // Update local SQLite version to match the server's new version
           await db.runAsync(
             'UPDATE burials SET version = ?, synced_at = ? WHERE id = ?',
+            data.version,
+            new Date().toISOString(),
+            job.entity_id
+          );
+        }
+      } 
+      else if (job.entity_type === 'plot' && job.operation === 'insert') {
+        const payload = JSON.parse(job.payload as unknown as string);
+        const localPlot = await db.getFirstAsync<any>('SELECT * FROM plots WHERE id = ?', job.entity_id);
+        if (!localPlot) throw new Error('Local plot missing.');
+
+        const { data, error } = await supabase
+          .from('plots')
+          .insert({
+            id: localPlot.id,
+            cemetery_id: localPlot.cemetery_id,
+            section_id: localPlot.section_id,
+            plot_identifier: localPlot.plot_identifier,
+            geometry: payload.geometry,
+            geometry_source: localPlot.geometry_source,
+            geometry_verified: localPlot.geometry_verified === 1,
+          })
+          .select('version')
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          await db.runAsync(
+            'UPDATE plots SET version = ?, synced_at = ? WHERE id = ?',
+            data.version,
+            new Date().toISOString(),
+            job.entity_id
+          );
+        }
+      }
+      else if (job.entity_type === 'cemetery' && job.operation === 'insert') {
+        const payload = JSON.parse(job.payload as unknown as string);
+        
+        const { data, error } = await supabase
+          .from('cemeteries')
+          .insert({
+            id: payload.id,
+            name: payload.name,
+            location: payload.location,
+            notes: payload.notes,
+            boundary: null, // Update when we add boundary drawing
+          })
+          .select('version')
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          await db.runAsync(
+            'UPDATE cemeteries SET version = ?, synced_at = ? WHERE id = ?',
             data.version,
             new Date().toISOString(),
             job.entity_id
@@ -88,6 +136,50 @@ export async function queueBurialUpdate(burialId: string, status: string, baseVe
     'update',
     JSON.stringify({ status }),
     baseVersion,
+    'pending',
+    new Date().toISOString(),
+    new Date().toISOString()
+  );
+}
+
+export async function queuePlotCreate(plotId: string, geometry: any, plotIdentifier: string): Promise<void> {
+  const db = await getDb();
+  const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  
+  await db.runAsync(
+    `INSERT INTO sync_queue (
+       id, entity_type, entity_id, operation, payload, 
+       base_version, status, created_at, updated_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    jobId,
+    'plot',
+    plotId,
+    'insert',
+    JSON.stringify({ geometry, plot_identifier: plotIdentifier }),
+    0,
+    'pending',
+    new Date().toISOString(),
+    new Date().toISOString()
+  );
+}
+
+export async function queueCemeteryCreate(cemeteryId: string, data: any): Promise<void> {
+  const db = await getDb();
+  const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  
+  await db.runAsync(
+    `INSERT INTO sync_queue (
+       id, entity_type, entity_id, operation, payload, 
+       base_version, status, created_at, updated_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    jobId,
+    'cemetery',
+    cemeteryId,
+    'insert',
+    JSON.stringify(data),
+    0,
     'pending',
     new Date().toISOString(),
     new Date().toISOString()

@@ -121,12 +121,13 @@ export async function listAllBurials(
   return rows.map(rowToBurial);
 }
 
+// FIX: Only return verified burials for the public map view
 export async function listBurialsByPlot(
   db: SQLiteDatabase,
   plotId: string,
 ): Promise<CachedBurial[]> {
   const rows = await db.getAllAsync<BurialRow>(
-    'SELECT * FROM burials WHERE plot_id = ? ORDER BY full_name ASC',
+    "SELECT * FROM burials WHERE plot_id = ? AND status = 'verified' ORDER BY full_name ASC",
     plotId,
   );
   return rows.map(rowToBurial);

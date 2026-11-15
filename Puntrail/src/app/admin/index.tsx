@@ -93,23 +93,7 @@ export default function AdminDashboardScreen() {
               ]}>
               <Text style={[styles.cardTitle, { color: colors.text }]}>Cemeteries</Text>
               <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-                View, add, and edit cemetery records
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => router.push('/admin/plots')}
-              android_ripple={{ color: colors.backgroundSelected }}
-              style={({ pressed }) => [
-                styles.card,
-                {
-                  backgroundColor: pressed ? colors.backgroundSelected : colors.backgroundElement,
-                  borderColor: colors.border,
-                },
-              ]}>
-              <Text style={[styles.cardTitle, { color: colors.text }]}>Plots</Text>
-              <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-                Draw and verify burial plot polygons on the map
+                Manage cemeteries and their mapped plots
               </Text>
             </Pressable>
 
@@ -147,9 +131,7 @@ export default function AdminDashboardScreen() {
               {isSyncing ? (
                 <ActivityIndicator color={colors.primary} />
               ) : (
-                <Text style={[styles.cardTitle, { color: colors.primary }]}>
-                  Sync now
-                </Text>
+                <Text style={[styles.cardTitle, { color: colors.primary }]}>Sync now</Text>
               )}
               <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
                 Upload pending offline changes to Supabase
@@ -187,7 +169,13 @@ const styles = StyleSheet.create({
   title: { fontSize: 30, fontWeight: '700', letterSpacing: -0.5 },
   subtitle: { fontSize: 15, lineHeight: 21 },
   section: { gap: Spacing.two },
-  sectionTitle: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: Spacing.one },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: Spacing.one,
+  },
   card: {
     paddingVertical: Spacing.three,
     paddingHorizontal: Spacing.four,
