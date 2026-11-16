@@ -1,245 +1,349 @@
-import { getDb } from '@/lib/db';
-import { supabase } from '@/lib/supabase';
-import type { SyncQueueEntry } from '@/types';
+import { useEffect, useState, useCallback } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useColorScheme,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
-import type { Burial } from '@/types';
+import { useRouter } from 'expo-router';
 
-export async function processSyncQueue(): Promise<{ success: number; failed: number; errors: string[] }> {
-  const db = await getDb();
-  let successCount = 0;
-  let failedCount = 0;
-  const errors: string[] = [];
+import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { getDb, listCemeteries, upsertCemetery, deleteCemetery } from '@/lib/db';
+import { 
+  queueCemeteryCreate, 
+  queueCemeteryUpdate, 
+  queueCemeteryDelete 
+} from '@/lib/sync/upload';
+import { runAutoSync } from '@/lib/sync/autoSync';
+import type { CachedCemetery, Cemetery } from '@/types';
 
-  const pendingJobs = await db.getAllAsync<SyncQueueEntry>(
-    "SELECT * FROM sync_queue WHERE status = 'pending' ORDER BY created_at ASC"
-  );
+export default function AdminCemeteriesScreen() {
+  const scheme = useColorScheme();
+  const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
 
-  if (pendingJobs.length === 0) return { success: 0, failed: 0, errors: [] };
+  const [cemeteries, setCemeteries] = useState<CachedCemetery[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
-  for (const job of pendingJobs) {
+  const [name, setName] = useState('');
+  const [location, setLocation] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  const [editingCemetery, setEditingCemetery] = useState<CachedCemetery | null>(null);
+
+  const loadData = useCallback(async () => {
     try {
-      await db.runAsync(
-        "UPDATE sync_queue SET status = 'in_progress', updated_at = ? WHERE id = ?",
-        new Date().toISOString(),
-        job.id
-      );
-
-      // ── Burial: Insert ──
-      if (job.entity_type === 'burial' && job.operation === 'insert') {
-        const payload = JSON.parse(job.payload as unknown as string) as Burial;
-        const { data, error } = await supabase
-          .from('burials')
-          .insert({
-            id: payload.id,
-            plot_id: payload.plot_id,
-            full_name: payload.full_name,
-            name_normalized: payload.name_normalized,
-            date_of_death: payload.date_of_death,
-            date_of_burial: payload.date_of_burial,
-            age_at_death: payload.age_at_death,
-            status: payload.status,
-            version: payload.version,
-          })
-          .select('version')
-          .single();
-
-        if (error) throw error;
-        if (data) {
-          await db.runAsync(
-            'UPDATE burials SET version = ?, synced_at = ? WHERE id = ?',
-            data.version,
-            new Date().toISOString(),
-            job.entity_id
-          );
-        }
-      }
-      // ── Burial: Delete ──
-      else if (job.entity_type === 'burial' && job.operation === 'delete') {
-        const { error } = await supabase
-          .from('burials')
-          .delete()
-          .eq('id', job.entity_id);
-
-        if (error) throw error;
-      }
-      // ── Burial: Update ──
-      else if (job.entity_type === 'burial' && job.operation === 'update') {
-        const payload = JSON.parse(job.payload as unknown as string);
-        const { data, error } = await supabase
-          .from('burials')
-          .update({ status: payload.status })
-          .eq('id', job.entity_id)
-          .select('version')
-          .single();
-
-        if (error) throw error;
-        if (data) {
-          await db.runAsync(
-            'UPDATE burials SET version = ?, synced_at = ? WHERE id = ?',
-            data.version,
-            new Date().toISOString(),
-            job.entity_id
-          );
-        }
-      } 
-      // ── Plot: Insert ──
-      else if (job.entity_type === 'plot' && job.operation === 'insert') {
-        const payload = JSON.parse(job.payload as unknown as string);
-        const localPlot = await db.getFirstAsync<any>('SELECT * FROM plots WHERE id = ?', job.entity_id);
-        if (!localPlot) throw new Error('Local plot missing.');
-
-        const { data, error } = await supabase
-          .from('plots')
-          .insert({
-            id: localPlot.id,
-            cemetery_id: localPlot.cemetery_id,
-            section_id: localPlot.section_id,
-            plot_identifier: localPlot.plot_identifier,
-            geometry: payload.geometry,
-            geometry_source: localPlot.geometry_source,
-            geometry_verified: localPlot.geometry_verified === 1,
-          })
-          .select('version')
-          .single();
-
-        if (error) throw error;
-        if (data) {
-          await db.runAsync(
-            'UPDATE plots SET version = ?, synced_at = ? WHERE id = ?',
-            data.version,
-            new Date().toISOString(),
-            job.entity_id
-          );
-        }
-      }
-      // ── Cemetery: Insert ──
-      else if (job.entity_type === 'cemetery' && job.operation === 'insert') {
-        const payload = JSON.parse(job.payload as unknown as string);
-        
-        const { data, error } = await supabase
-          .from('cemeteries')
-          .insert({
-            id: payload.id,
-            name: payload.name,
-            location: payload.location,
-          })
-          .select('version')
-          .single();
-
-        if (error) throw error;
-        if (data) {
-          await db.runAsync(
-            'UPDATE cemeteries SET version = ?, synced_at = ? WHERE id = ?',
-            data.version,
-            new Date().toISOString(),
-            job.entity_id
-          );
-        }
-      }
-
-      await db.runAsync(
-        "UPDATE sync_queue SET status = 'synced', updated_at = ? WHERE id = ?",
-        new Date().toISOString(),
-        job.id
-      );
-      successCount++;
-
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      errors.push(errorMsg);
-      
-      await db.runAsync(
-        "UPDATE sync_queue SET status = 'failed', last_error = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?",
-        errorMsg,
-        new Date().toISOString(),
-        job.id
-      );
-      failedCount++;
+      const db = await getDb();
+      const records = await listCemeteries(db);
+      setCemeteries(records);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to load cemeteries.');
+    } finally {
+      setIsLoading(false);
     }
-  }
+  }, []);
 
-  return { success: successCount, failed: failedCount, errors };
-}
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
-export async function queueBurialUpdate(burialId: string, status: string, baseVersion: number): Promise<void> {
-  const db = await getDb();
-  const now = new Date().toISOString();
-  await db.runAsync(
-    `INSERT INTO sync_queue (
-       id, entity_type, entity_id, operation, payload, 
-       base_version, status, attempts, created_at, updated_at
-     )
-     VALUES (?, 'burial', ?, 'update', ?, ?, 'pending', 0, ?, ?)`,
-    Crypto.randomUUID(),
-    burialId,
-    JSON.stringify({ status }),
-    baseVersion,
-    now,
-    now
+  const resetForm = () => {
+    setName('');
+    setLocation('');
+    setIsAdding(false);
+    setEditingCemetery(null);
+  };
+
+  const handleEditClick = (cemetery: CachedCemetery) => {
+    setName(cemetery.name);
+    setLocation(cemetery.location);
+    setEditingCemetery(cemetery);
+    setIsAdding(true);
+  };
+
+  const handleSave = async () => {
+    if (!name.trim() || !location.trim()) {
+      Alert.alert('Error', 'Name and location are required.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const db = await getDb();
+      const now = new Date().toISOString();
+
+      if (editingCemetery) {
+        // ── Update ──
+        const updated: Cemetery = {
+          id: editingCemetery.id,
+          name: name.trim(),
+          location: location.trim(),
+          boundary: editingCemetery.boundary,
+          notes: editingCemetery.notes,
+          version: editingCemetery.version,
+          created_at: now,
+          updated_at: now,
+        };
+
+        await db.withTransactionAsync(async () => {
+          await upsertCemetery(db, updated);
+          await queueCemeteryUpdate(editingCemetery.id, updated, editingCemetery.version);
+        });
+      } else {
+        // ── Create ──
+        const newId = Crypto.randomUUID();
+        const newCemetery: Cemetery = {
+          id: newId,
+          name: name.trim(),
+          location: location.trim(),
+          boundary: null,
+          notes: null,
+          version: 1,
+          created_at: now,
+          updated_at: now,
+        };
+
+        await db.withTransactionAsync(async () => {
+          await upsertCemetery(db, newCemetery);
+          await queueCemeteryCreate(newId, newCemetery);
+        });
+      }
+
+      resetForm();
+      await loadData();
+      void runAutoSync();
+      Alert.alert('Success', editingCemetery ? 'Cemetery updated.' : 'Cemetery created.');
+    } catch (err) {
+      Alert.alert('Save Failed', err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = (cemetery: CachedCemetery) => {
+    Alert.alert(
+      'Delete cemetery?',
+      `Remove "${cemetery.name}"? Any plots inside it will also be removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const db = await getDb();
+              await db.withTransactionAsync(async () => {
+                await deleteCemetery(db, cemetery.id);
+                await queueCemeteryDelete(cemetery.id, cemetery.version);
+              });
+              setCemeteries((prev) => prev.filter((c) => c.id !== cemetery.id));
+              void runAutoSync();
+            } catch (err) {
+              Alert.alert('Delete failed', err instanceof Error ? err.message : 'Unknown error');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  return (
+    <View style={[styles.safe, { backgroundColor: colors.background, paddingTop: insets.top }]}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}>
+        {isLoading ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : (
+          <FlatList
+            data={cemeteries}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
+            ListHeaderComponent={
+              <View style={styles.headerContainer}>
+                <View style={styles.headerRow}>
+                  <Text style={[styles.title, { color: colors.text }]}>Cemeteries</Text>
+                  <Pressable
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      if (isAdding) {
+                        resetForm();
+                      } else {
+                        setIsAdding(true);
+                      }
+                    }}
+                    style={[styles.addButton, { backgroundColor: colors.primary }]}>
+                    <Text style={{ color: colors.primaryText, fontWeight: '600' }}>
+                      {isAdding ? 'Cancel' : '+ Add New'}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {isAdding && (
+                  <View
+                    style={[
+                      styles.formCard,
+                      { backgroundColor: colors.backgroundElement, borderColor: colors.border },
+                    ]}>
+                    <TextInput
+                      style={[styles.input, { color: colors.text, borderColor: colors.border }]}
+                      placeholder="Cemetery Name"
+                      placeholderTextColor={colors.textSecondary}
+                      value={name}
+                      onChangeText={setName}
+                    />
+                    <TextInput
+                      style={[styles.input, { color: colors.text, borderColor: colors.border }]}
+                      placeholder="Location (e.g., Isabela City)"
+                      placeholderTextColor={colors.textSecondary}
+                      value={location}
+                      onChangeText={setLocation}
+                    />
+                    <Pressable
+                      onPress={handleSave}
+                      disabled={isSaving}
+                      style={[styles.saveButton, { backgroundColor: colors.primary }]}>
+                      {isSaving ? (
+                        <ActivityIndicator color={colors.primaryText} />
+                      ) : (
+                        <Text style={{ color: colors.primaryText, fontWeight: '600' }}>
+                          {editingCemetery ? 'Update Cemetery' : 'Save Cemetery'}
+                        </Text>
+                      )}
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+            }
+            ListEmptyComponent={
+              <View style={styles.empty}>
+                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                  No cemeteries found.
+                </Text>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: '/admin/cemetery/[id]',
+                    params: { id: item.id },
+                  })
+                }
+                android_ripple={{ color: colors.backgroundSelected }}
+                style={({ pressed }) => [
+                  styles.card,
+                  {
+                    backgroundColor: pressed ? colors.backgroundSelected : colors.backgroundElement,
+                    borderColor: colors.border,
+                  },
+                ]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{item.name}</Text>
+                <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+                  {item.location}
+                </Text>
+                
+                <View style={styles.cardActions}>
+                  <Pressable
+                    onPress={() => handleEditClick(item)}
+                    hitSlop={8}
+                    style={styles.actionBtn}>
+                    <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>
+                      Edit
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleDelete(item)}
+                    hitSlop={8}
+                    style={styles.actionBtn}>
+                    <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 13 }}>
+                      Delete
+                    </Text>
+                  </Pressable>
+                </View>
+              </Pressable>
+            )}
+          />
+        )}
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
-export async function queueBurialDelete(burialId: string, baseVersion: number): Promise<void> {
-  const db = await getDb();
-  const now = new Date().toISOString();
-  await db.runAsync(
-    `INSERT INTO sync_queue
-       (id, entity_type, entity_id, operation, payload, base_version, status, attempts, created_at, updated_at)
-     VALUES (?, 'burial', ?, 'delete', ?, ?, 'pending', 0, ?, ?)`,
-    Crypto.randomUUID(),
-    burialId,
-    '{}',
-    baseVersion,
-    now,
-    now,
-  );
-}
-
-export async function queueBurialCreate(burialId: string, burial: Burial): Promise<void> {
-  const db = await getDb();
-  const now = new Date().toISOString();
-  await db.runAsync(
-    `INSERT INTO sync_queue
-       (id, entity_type, entity_id, operation, payload, base_version, status, attempts, created_at, updated_at)
-     VALUES (?, 'burial', ?, 'insert', ?, 0, 'pending', 0, ?, ?)`,
-    Crypto.randomUUID(),
-    burialId,
-    JSON.stringify(burial),
-    now,
-    now,
-  );
-}
-
-export async function queuePlotCreate(plotId: string, geometry: any, plotIdentifier: string): Promise<void> {
-  const db = await getDb();
-  const now = new Date().toISOString();
-  await db.runAsync(
-    `INSERT INTO sync_queue (
-       id, entity_type, entity_id, operation, payload, 
-       base_version, status, attempts, created_at, updated_at
-     )
-     VALUES (?, 'plot', ?, 'insert', ?, 0, 'pending', 0, ?, ?)`,
-    Crypto.randomUUID(),
-    plotId,
-    JSON.stringify({ geometry, plot_identifier: plotIdentifier }),
-    now,
-    now
-  );
-}
-
-export async function queueCemeteryCreate(cemeteryId: string, data: any): Promise<void> {
-  const db = await getDb();
-  const now = new Date().toISOString();
-  await db.runAsync(
-    `INSERT INTO sync_queue (
-       id, entity_type, entity_id, operation, payload, 
-       base_version, status, attempts, created_at, updated_at
-     )
-     VALUES (?, 'cemetery', ?, 'insert', ?, 0, 'pending', 0, ?, ?)`,
-    Crypto.randomUUID(),
-    cemeteryId,
-    JSON.stringify(data),
-    now,
-    now
-  );
-}
+const styles = StyleSheet.create({
+  safe: { flex: 1 },
+  container: { flex: 1 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  listContent: {
+    padding: Spacing.four,
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: MaxContentWidth,
+    gap: Spacing.two,
+  },
+  headerContainer: {
+    marginBottom: Spacing.four,
+    gap: Spacing.three,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  title: { fontSize: 24, fontWeight: '700' },
+  addButton: {
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.md,
+  },
+  formCard: {
+    padding: Spacing.four,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: Spacing.three,
+  },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md,
+    padding: Spacing.three,
+    fontSize: 16,
+    backgroundColor: 'transparent',
+  },
+  saveButton: {
+    padding: Spacing.three,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+  },
+  empty: { padding: Spacing.six, alignItems: 'center' },
+  emptyText: { fontSize: 16 },
+  card: {
+    padding: Spacing.four,
+    borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: Spacing.one,
+    overflow: 'hidden',
+  },
+  cardTitle: { fontSize: 18, fontWeight: '600' },
+  cardSubtitle: { fontSize: 14 },
+  cardActions: {
+    flexDirection: 'row',
+    gap: Spacing.four,
+    marginTop: Spacing.two,
+  },
+  actionBtn: { paddingVertical: 2 },
+});

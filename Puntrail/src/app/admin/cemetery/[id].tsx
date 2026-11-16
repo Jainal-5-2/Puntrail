@@ -13,7 +13,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
-import { getDb, getCemeteryById, listPlotsByCemetery } from '@/lib/db';
+import { getDb, getCemeteryById, listPlotsByCemetery, deletePlot } from '@/lib/db';
+import { queuePlotDelete } from '@/lib/sync/upload';
+import { runAutoSync } from '@/lib/sync/autoSync';
 import type { CachedCemetery, CachedPlot } from '@/types';
 
 export default function CemeteryDetailScreen() {
@@ -50,6 +52,33 @@ export default function CemeteryDetailScreen() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  const handleDelete = (plot: CachedPlot) => {
+    Alert.alert(
+      'Delete plot?',
+      `Remove "${plot.plot_identifier}"? This will also remove any burials tied to it.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const db = await getDb();
+              await db.withTransactionAsync(async () => {
+                await deletePlot(db, plot.id);
+                await queuePlotDelete(plot.id, plot.version);
+              });
+              setPlots((prev) => prev.filter((p) => p.id !== plot.id));
+              void runAutoSync();
+            } catch (err) {
+              Alert.alert('Delete failed', err instanceof Error ? err.message : 'Unknown error');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   if (isLoading) {
     return (
@@ -121,6 +150,30 @@ export default function CemeteryDetailScreen() {
             <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
               Source: {item.geometry_source} | Version: {item.version}
             </Text>
+
+            <View style={styles.cardActions}>
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: '/admin/plots',
+                    params: { cemeteryId: id, plotId: item.id },
+                  })
+                }
+                hitSlop={8}
+                style={styles.actionBtn}>
+                <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>
+                  Edit
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => handleDelete(item)}
+                hitSlop={8}
+                style={styles.actionBtn}>
+                <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 13 }}>
+                  Delete
+                </Text>
+              </Pressable>
+            </View>
           </View>
         )}
       />
@@ -177,4 +230,10 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   cardMeta: { fontSize: 12, fontStyle: 'italic' },
+  cardActions: {
+    flexDirection: 'row',
+    gap: Spacing.four,
+    marginTop: Spacing.two,
+  },
+  actionBtn: { paddingVertical: 2 },
 });

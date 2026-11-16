@@ -112,6 +112,38 @@ export async function processSyncQueue(): Promise<{ success: number; failed: num
           );
         }
       }
+      // ── Plot: Update ──
+      else if (job.entity_type === 'plot' && job.operation === 'update') {
+        const payload = JSON.parse(job.payload as unknown as string);
+        const { data, error } = await supabase
+          .from('plots')
+          .update({
+            geometry: payload.geometry,
+            plot_identifier: payload.plot_identifier,
+          })
+          .eq('id', job.entity_id)
+          .select('version')
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          await db.runAsync(
+            'UPDATE plots SET version = ?, synced_at = ? WHERE id = ?',
+            data.version,
+            new Date().toISOString(),
+            job.entity_id
+          );
+        }
+      }
+      // ── Plot: Delete ──
+      else if (job.entity_type === 'plot' && job.operation === 'delete') {
+        const { error } = await supabase
+          .from('plots')
+          .delete()
+          .eq('id', job.entity_id);
+
+        if (error) throw error;
+      }
       // ── Cemetery: Insert ──
       else if (job.entity_type === 'cemetery' && job.operation === 'insert') {
         const payload = JSON.parse(job.payload as unknown as string);
@@ -137,6 +169,39 @@ export async function processSyncQueue(): Promise<{ success: number; failed: num
             job.entity_id
           );
         }
+      }
+      // ── Cemetery: Update ──
+      else if (job.entity_type === 'cemetery' && job.operation === 'update') {
+        const payload = JSON.parse(job.payload as unknown as string);
+        const { data, error } = await supabase
+          .from('cemeteries')
+          .update({
+            name: payload.name,
+            location: payload.location,
+            notes: payload.notes,
+          })
+          .eq('id', job.entity_id)
+          .select('version')
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          await db.runAsync(
+            'UPDATE cemeteries SET version = ?, synced_at = ? WHERE id = ?',
+            data.version,
+            new Date().toISOString(),
+            job.entity_id
+          );
+        }
+      }
+      // ── Cemetery: Delete ──
+      else if (job.entity_type === 'cemetery' && job.operation === 'delete') {
+        const { error } = await supabase
+          .from('cemeteries')
+          .delete()
+          .eq('id', job.entity_id);
+
+        if (error) throw error;
       }
 
       await db.runAsync(
@@ -228,6 +293,42 @@ export async function queuePlotCreate(plotId: string, geometry: any, plotIdentif
   );
 }
 
+export async function queuePlotUpdate(plotId: string, data: any, baseVersion: number): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO sync_queue (
+       id, entity_type, entity_id, operation, payload, 
+       base_version, status, attempts, created_at, updated_at
+     )
+     VALUES (?, 'plot', ?, 'update', ?, ?, 'pending', 0, ?, ?)`,
+    Crypto.randomUUID(),
+    plotId,
+    JSON.stringify(data),
+    baseVersion,
+    now,
+    now
+  );
+}
+
+export async function queuePlotDelete(plotId: string, baseVersion: number): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO sync_queue (
+       id, entity_type, entity_id, operation, payload, 
+       base_version, status, attempts, created_at, updated_at
+     )
+     VALUES (?, 'plot', ?, 'delete', ?, ?, 'pending', 0, ?, ?)`,
+    Crypto.randomUUID(),
+    plotId,
+    '{}',
+    baseVersion,
+    now,
+    now
+  );
+}
+
 export async function queueCemeteryCreate(cemeteryId: string, data: any): Promise<void> {
   const db = await getDb();
   const now = new Date().toISOString();
@@ -240,6 +341,42 @@ export async function queueCemeteryCreate(cemeteryId: string, data: any): Promis
     Crypto.randomUUID(),
     cemeteryId,
     JSON.stringify(data),
+    now,
+    now
+  );
+}
+
+export async function queueCemeteryUpdate(cemeteryId: string, data: any, baseVersion: number): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO sync_queue (
+       id, entity_type, entity_id, operation, payload, 
+       base_version, status, attempts, created_at, updated_at
+     )
+     VALUES (?, 'cemetery', ?, 'update', ?, ?, 'pending', 0, ?, ?)`,
+    Crypto.randomUUID(),
+    cemeteryId,
+    JSON.stringify(data),
+    baseVersion,
+    now,
+    now
+  );
+}
+
+export async function queueCemeteryDelete(cemeteryId: string, baseVersion: number): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO sync_queue (
+       id, entity_type, entity_id, operation, payload, 
+       base_version, status, attempts, created_at, updated_at
+     )
+     VALUES (?, 'cemetery', ?, 'delete', ?, ?, 'pending', 0, ?, ?)`,
+    Crypto.randomUUID(),
+    cemeteryId,
+    '{}',
+    baseVersion,
     now,
     now
   );

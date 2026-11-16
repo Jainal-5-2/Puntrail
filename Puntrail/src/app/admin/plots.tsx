@@ -24,8 +24,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 
 import { Colors, Radius, Spacing } from '@/constants/theme';
-import { getDb, getCemeteryById, upsertPlot } from '@/lib/db';
-import { queuePlotCreate } from '@/lib/sync/upload';
+import { getDb, getCemeteryById, upsertPlot, listPlotsByCemetery } from '@/lib/db';
+import { queuePlotCreate, queuePlotUpdate } from '@/lib/sync/upload';
+import { runAutoSync } from '@/lib/sync/autoSync';
 import type { CachedCemetery, Plot } from '@/types';
 
 const MAP_STYLE = process.env.EXPO_PUBLIC_MAPTILER_STYLE_URL;
@@ -36,23 +37,58 @@ export default function AdminPlotsScreen() {
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { cemeteryId } = useLocalSearchParams<{ cemeteryId?: string }>();
+  const { cemeteryId, plotId } = useLocalSearchParams<{ cemeteryId?: string; plotId?: string }>();
 
   const cameraRef = useRef<CameraRef>(null);
   const [cemetery, setCemetery] = useState<CachedCemetery | null>(null);
   const [vertices, setVertices] = useState<[number, number][]>([]);
   const [plotIdentifier, setPlotIdentifier] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [existingVersion, setExistingVersion] = useState<number | null>(null);
 
-  // Load the cemetery so we can display its name and validate the id.
+  // Load cemetery + existing plot (if editing)
   useEffect(() => {
     (async () => {
       if (!cemeteryId) return;
       const db = await getDb();
       const record = await getCemeteryById(db, cemeteryId);
       if (record) setCemetery(record);
+
+      if (plotId) {
+        const localPlots = await listPlotsByCemetery(db, cemeteryId);
+        const existing = localPlots.find((p) => p.id === plotId);
+        if (existing) {
+          setPlotIdentifier(existing.plot_identifier);
+          setExistingVersion(existing.version);
+
+          const coords =
+            existing.geometry.type === 'Polygon'
+              ? existing.geometry.coordinates[0]
+              : existing.geometry.coordinates[0][0];
+
+          // Drop the duplicated closing point
+          setVertices(coords.slice(0, -1) as [number, number][]);
+
+          // Fly to the center of the existing polygon
+          if (cameraRef.current && coords.length > 0) {
+            const lngs = coords.map((c) => c[0]);
+            const lats = coords.map((c) => c[1]);
+            const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+            const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+
+            // Add a small delay to ensure the map is ready
+            setTimeout(() => {
+              cameraRef.current?.flyTo({
+                center: [centerLng, centerLat],
+                zoom: 19,
+                duration: 1000,
+              });
+            }, 500);
+          }
+        }
+      }
     })();
-  }, [cemeteryId]);
+  }, [cemeteryId, plotId]);
 
   const handleMapPress = (event: any) => {
     Keyboard.dismiss();
@@ -124,25 +160,33 @@ export default function AdminPlotsScreen() {
     try {
       const db = await getDb();
       const closedPolygon = [...vertices, vertices[0]];
-      const newPlotId = Crypto.randomUUID();
+      const now = new Date().toISOString();
+      const targetId = plotId || Crypto.randomUUID();
 
       const newPlot: Plot = {
-        id: newPlotId,
+        id: targetId,
         cemetery_id: cemeteryId,
         section_id: null,
         plot_identifier: plotIdentifier.trim(),
         geometry: { type: 'Polygon', coordinates: [closedPolygon] },
         geometry_source: 'survey',
         geometry_verified: true,
-        version: 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        version: existingVersion || 1,
+        created_at: now,
+        updated_at: now,
       };
 
-      await upsertPlot(db, newPlot);
-      await queuePlotCreate(newPlotId, newPlot.geometry, newPlot.plot_identifier);
+      await db.withTransactionAsync(async () => {
+        await upsertPlot(db, newPlot);
+        if (plotId && existingVersion) {
+          await queuePlotUpdate(targetId, newPlot, existingVersion);
+        } else {
+          await queuePlotCreate(targetId, newPlot.geometry, newPlot.plot_identifier);
+        }
+      });
 
-      Alert.alert('Success', 'Plot saved and queued for sync.');
+      void runAutoSync();
+      Alert.alert('Success', plotId ? 'Plot updated.' : 'Plot saved and queued for sync.');
       router.back();
     } catch (err) {
       Alert.alert('Save Failed', err instanceof Error ? err.message : 'Unknown error');
@@ -196,7 +240,8 @@ export default function AdminPlotsScreen() {
       <View style={[styles.overlay, { bottom: 0, paddingBottom: insets.bottom }]} pointerEvents="box-none">
         <View style={[styles.panel, { backgroundColor: colors.backgroundElement }]}>
           <Text style={[styles.title, { color: colors.text }]}>
-            Draw Plot{cemetery ? ` in ${cemetery.name}` : ''} ({vertices.length} pts)
+            {plotId ? 'Edit Plot' : 'Draw Plot'}
+            {cemetery ? ` in ${cemetery.name}` : ''} ({vertices.length} pts)
           </Text>
           <Text style={[styles.hint, { color: colors.textSecondary }]}>
             Tap the map to place vertices. Minimum 3 points.
@@ -226,7 +271,9 @@ export default function AdminPlotsScreen() {
               {isSaving ? (
                 <ActivityIndicator color={colors.primaryText} />
               ) : (
-                <Text style={{ color: colors.primaryText }}>Save Plot</Text>
+                <Text style={{ color: colors.primaryText }}>
+                  {plotId ? 'Update Plot' : 'Save Plot'}
+                </Text>
               )}
             </Pressable>
           </View>
