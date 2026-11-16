@@ -27,7 +27,7 @@ import { Colors, Radius, Spacing } from '@/constants/theme';
 import { getDb, getCemeteryById, upsertPlot, listPlotsByCemetery } from '@/lib/db';
 import { queuePlotCreate, queuePlotUpdate } from '@/lib/sync/upload';
 import { runAutoSync } from '@/lib/sync/autoSync';
-import type { CachedCemetery, Plot } from '@/types';
+import type { CachedCemetery, CachedPlot, Plot } from '@/types';
 
 const MAP_STYLE = process.env.EXPO_PUBLIC_MAPTILER_STYLE_URL;
 const DEFAULT_CENTER: [number, number] = [121.9711, 6.7054];
@@ -41,12 +41,13 @@ export default function AdminPlotsScreen() {
 
   const cameraRef = useRef<CameraRef>(null);
   const [cemetery, setCemetery] = useState<CachedCemetery | null>(null);
+  const [backgroundPlots, setBackgroundPlots] = useState<CachedPlot[]>([]);
   const [vertices, setVertices] = useState<[number, number][]>([]);
   const [plotIdentifier, setPlotIdentifier] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [existingVersion, setExistingVersion] = useState<number | null>(null);
 
-  // Load cemetery + existing plot (if editing)
+  // Load cemetery + all plots + existing plot (if editing)
   useEffect(() => {
     (async () => {
       if (!cemeteryId) return;
@@ -54,8 +55,12 @@ export default function AdminPlotsScreen() {
       const record = await getCemeteryById(db, cemeteryId);
       if (record) setCemetery(record);
 
+      const localPlots = await listPlotsByCemetery(db, cemeteryId);
+      
+      // Set background plots (excluding the one we are currently editing)
+      setBackgroundPlots(localPlots.filter((p) => p.id !== plotId));
+
       if (plotId) {
-        const localPlots = await listPlotsByCemetery(db, cemeteryId);
         const existing = localPlots.find((p) => p.id === plotId);
         if (existing) {
           setPlotIdentifier(existing.plot_identifier);
@@ -76,7 +81,6 @@ export default function AdminPlotsScreen() {
             const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
             const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
 
-            // Add a small delay to ensure the map is ready
             setTimeout(() => {
               cameraRef.current?.flyTo({
                 center: [centerLng, centerLat],
@@ -97,6 +101,22 @@ export default function AdminPlotsScreen() {
       setVertices((prev) => [...prev, lngLat as [number, number]]);
     }
   };
+
+  const handleUndo = () => {
+    setVertices((prev) => prev.slice(0, -1));
+  };
+
+  // GeoJSON for existing plots to show as background
+  const backgroundGeojson = useMemo(() => {
+    return {
+      type: 'FeatureCollection',
+      features: backgroundPlots.map((p) => ({
+        type: 'Feature',
+        properties: { id: p.id, identifier: p.plot_identifier },
+        geometry: p.geometry,
+      })),
+    } as GeoJSON.FeatureCollection;
+  }, [backgroundPlots]);
 
   const previewGeojson = useMemo(() => {
     if (vertices.length < 3) {
@@ -211,6 +231,20 @@ export default function AdminPlotsScreen() {
       <Map style={styles.map} mapStyle={MAP_STYLE} onPress={handleMapPress}>
         <Camera ref={cameraRef} initialViewState={{ center: DEFAULT_CENTER, zoom: 19 }} />
 
+        {/* Background Existing Plots */}
+        <GeoJSONSource id="background-plots" data={backgroundGeojson}>
+          <Layer
+            type="fill"
+            id="background-fill"
+            paint={{ 'fill-color': '#8B949E', 'fill-opacity': 0.2 }}
+          />
+          <Layer
+            type="line"
+            id="background-outline"
+            paint={{ 'line-color': '#8B949E', 'line-width': 1 }}
+          />
+        </GeoJSONSource>
+
         <GeoJSONSource id="line" data={lineGeojson}>
           <Layer type="line" id="draw-line" paint={{ 'line-color': '#2F81F7', 'line-width': 2 }} />
         </GeoJSONSource>
@@ -260,8 +294,27 @@ export default function AdminPlotsScreen() {
 
           <View style={styles.actions}>
             <Pressable
+              onPress={handleUndo}
+              disabled={vertices.length === 0}
+              style={[
+                styles.button,
+                {
+                  backgroundColor: colors.backgroundSelected,
+                  opacity: vertices.length === 0 ? 0.5 : 1,
+                },
+              ]}>
+              <Text style={{ color: colors.text }}>Undo</Text>
+            </Pressable>
+            <Pressable
               onPress={() => setVertices([])}
-              style={[styles.button, { backgroundColor: colors.backgroundSelected }]}>
+              disabled={vertices.length === 0}
+              style={[
+                styles.button,
+                {
+                  backgroundColor: colors.backgroundSelected,
+                  opacity: vertices.length === 0 ? 0.5 : 1,
+                },
+              ]}>
               <Text style={{ color: colors.text }}>Clear</Text>
             </Pressable>
             <Pressable
@@ -272,7 +325,7 @@ export default function AdminPlotsScreen() {
                 <ActivityIndicator color={colors.primaryText} />
               ) : (
                 <Text style={{ color: colors.primaryText }}>
-                  {plotId ? 'Update Plot' : 'Save Plot'}
+                  {plotId ? 'Update' : 'Save'}
                 </Text>
               )}
             </Pressable>

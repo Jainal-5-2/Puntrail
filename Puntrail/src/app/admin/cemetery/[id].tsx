@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useState, useCallback } from 'react';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
@@ -49,9 +49,12 @@ export default function CemeteryDetailScreen() {
     }
   }, [id, router]);
 
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
+  // Refresh data every time the screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      void loadData();
+    }, [loadData])
+  );
 
   const handleDelete = (plot: CachedPlot) => {
     Alert.alert(
