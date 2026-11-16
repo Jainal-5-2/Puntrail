@@ -45,3 +45,5 @@ coverage/
 # EAS / Expo credentials
 .easignore
 credentials.json
+
+digest.txt

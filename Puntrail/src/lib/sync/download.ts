@@ -21,6 +21,31 @@ interface SupabasePlotRow {
   updated_at: string;
 }
 
+async function deleteMissingLocal(
+  db: Awaited<ReturnType<typeof getDb>>,
+  table: 'cemeteries' | 'sections' | 'plots' | 'burials',
+  entityType: 'cemetery' | 'section' | 'plot' | 'burial',
+  remoteIds: string[],
+) {
+  // Find IDs that are queued locally — do NOT delete those.
+  const queued = await db.getAllAsync<{ entity_id: string }>(
+    `SELECT DISTINCT entity_id FROM sync_queue WHERE entity_type = ? AND status IN ('pending', 'in_progress', 'failed')`,
+    entityType,
+  );
+  const protectedIds = new Set(queued.map((r) => r.entity_id));
+
+  // Filter out remote IDs to find local rows to delete
+  const local = await db.getAllAsync<{ id: string }>(`SELECT id FROM ${table}`);
+  const toDelete = local
+    .map((r) => r.id)
+    .filter((id) => !remoteIds.includes(id) && !protectedIds.has(id));
+
+  if (toDelete.length === 0) return;
+
+  const placeholders = toDelete.map(() => '?').join(',');
+  await db.runAsync(`DELETE FROM ${table} WHERE id IN (${placeholders})`, ...toDelete);
+}
+
 export async function downloadCemeteryData(): Promise<void> {
   const db = await getDb();
 
@@ -30,11 +55,10 @@ export async function downloadCemeteryData(): Promise<void> {
     .select('*');
 
   if (cemError) throw new Error(`Failed to fetch cemeteries: ${cemError.message}`);
-  
+
   if (cemeteries) {
     const remoteIds = cemeteries.map((r) => r.id);
-    
-    // Upsert remote data
+
     for (const row of cemeteries) {
       const cemetery: Cemetery = {
         id: row.id,
@@ -49,23 +73,14 @@ export async function downloadCemeteryData(): Promise<void> {
       await upsertCemetery(db, cemetery);
     }
 
-    // Delete local rows that no longer exist on the server
-    if (remoteIds.length > 0) {
-      const placeholders = remoteIds.map(() => '?').join(',');
-      await db.runAsync(
-        `DELETE FROM cemeteries WHERE id NOT IN (${placeholders})`,
-        ...remoteIds
-      );
-    } else {
-      await db.runAsync(`DELETE FROM cemeteries`);
-    }
+    await deleteMissingLocal(db, 'cemeteries', 'cemetery', remoteIds);
   }
 
   // ── 2. Sections ──
   const { data: sections, error: secError } = await supabase
     .from('sections')
     .select('*');
-  
+
   if (!secError && sections) {
     const remoteIds = sections.map((r) => r.id);
 
@@ -82,15 +97,7 @@ export async function downloadCemeteryData(): Promise<void> {
       await upsertSection(db, section);
     }
 
-    if (remoteIds.length > 0) {
-      const placeholders = remoteIds.map(() => '?').join(',');
-      await db.runAsync(
-        `DELETE FROM sections WHERE id NOT IN (${placeholders})`,
-        ...remoteIds
-      );
-    } else {
-      await db.runAsync(`DELETE FROM sections`);
-    }
+    await deleteMissingLocal(db, 'sections', 'section', remoteIds);
   }
 
   // ── 3. Plots ──
@@ -98,7 +105,7 @@ export async function downloadCemeteryData(): Promise<void> {
     .rpc('get_plots_as_geojson');
 
   if (plotError) throw new Error(`Failed to fetch plots: ${plotError.message}`);
-  
+
   if (plots) {
     const remoteIds = (plots as SupabasePlotRow[]).map((r) => r.id);
 
@@ -118,15 +125,7 @@ export async function downloadCemeteryData(): Promise<void> {
       await upsertPlot(db, plot);
     }
 
-    if (remoteIds.length > 0) {
-      const placeholders = remoteIds.map(() => '?').join(',');
-      await db.runAsync(
-        `DELETE FROM plots WHERE id NOT IN (${placeholders})`,
-        ...remoteIds
-      );
-    } else {
-      await db.runAsync(`DELETE FROM plots`);
-    }
+    await deleteMissingLocal(db, 'plots', 'plot', remoteIds);
   }
 
   // ── 4. Burials ──
@@ -135,7 +134,7 @@ export async function downloadCemeteryData(): Promise<void> {
     .select('*');
 
   if (burialError) throw new Error(`Failed to fetch burials: ${burialError.message}`);
-  
+
   if (burials) {
     const remoteIds = burials.map((r) => r.id);
 
@@ -156,14 +155,6 @@ export async function downloadCemeteryData(): Promise<void> {
       await upsertBurial(db, burial);
     }
 
-    if (remoteIds.length > 0) {
-      const placeholders = remoteIds.map(() => '?').join(',');
-      await db.runAsync(
-        `DELETE FROM burials WHERE id NOT IN (${placeholders})`,
-        ...remoteIds
-      );
-    } else {
-      await db.runAsync(`DELETE FROM burials`);
-    }
+    await deleteMissingLocal(db, 'burials', 'burial', remoteIds);
   }
 }
