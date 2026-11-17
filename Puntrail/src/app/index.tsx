@@ -12,7 +12,8 @@ import {
   useColorScheme,
   Keyboard,
   Modal,
-  ScrollView,
+  PermissionsAndroid,
+  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -24,6 +25,7 @@ import {
   type PressEventWithFeatures,
 } from '@maplibre/maplibre-react-native';
 import type { NativeSyntheticEvent } from 'react-native';
+import Geolocation from '@react-native-community/geolocation';
 
 import { Colors, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { downloadCemeteryData } from '@/lib/sync/download';
@@ -48,6 +50,14 @@ const MAP_STYLE = process.env.EXPO_PUBLIC_MAPTILER_STYLE_URL;
 const DEFAULT_CENTER: [number, number] = [121.9711, 6.7054];
 const DEBOUNCE_MS = 300;
 
+type SimpleLocation = {
+  coords: {
+    latitude: number;
+    longitude: number;
+    accuracy: number | null;
+  };
+};
+
 export default function MapHomeScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
@@ -56,23 +66,23 @@ export default function MapHomeScreen() {
   const { role } = useAuth();
   const { isInternetReachable } = useNetwork();
 
-  // Data state
   const [cemetery, setCemetery] = useState<CachedCemetery | null>(null);
   const [plots, setPlots] = useState<CachedPlot[]>([]);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [bootError, setBootError] = useState<string | null>(null);
 
-  // Search state
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<BurialSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchVisible, setSearchVisible] = useState(false);
 
-  // Selection state
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
   const [selectedBurials, setSelectedBurials] = useState<CachedBurial[]>([]);
 
-  // UI state
+  const [userLocation, setUserLocation] = useState<SimpleLocation | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+
   const [showDevMenu, setShowDevMenu] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isDownloadingMap, setIsDownloadingMap] = useState(false);
@@ -80,8 +90,8 @@ export default function MapHomeScreen() {
 
   const cameraRef = useRef<CameraRef>(null);
   const hasDownloadedOnLaunch = useRef(false);
+  const hasAutoLocated = useRef(false);
 
-  // ── Initial data load ────────────────────────────────────────────────────
   const loadLocalData = useCallback(async () => {
     try {
       const db = await getDb();
@@ -111,7 +121,6 @@ export default function MapHomeScreen() {
     void loadLocalData();
   }, [loadLocalData]);
 
-  // ── Auto-download from Supabase when online ─────────────────────────────
   useEffect(() => {
     if (!isInternetReachable) return;
     if (hasDownloadedOnLaunch.current) return;
@@ -127,7 +136,6 @@ export default function MapHomeScreen() {
     })();
   }, [isInternetReachable, loadLocalData]);
 
-  // ── Search debounce ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!cemetery) return;
 
@@ -155,7 +163,6 @@ export default function MapHomeScreen() {
     return () => clearTimeout(handle);
   }, [query, cemetery]);
 
-  // ── Fetch burials when a plot is selected ────────────────────────────────
   useEffect(() => {
     if (!selectedPlotId) {
       setSelectedBurials([]);
@@ -178,7 +185,6 @@ export default function MapHomeScreen() {
     };
   }, [selectedPlotId]);
 
-  // ── Fly camera when search result selected ──────────────────────────────
   const flyToPlot = useCallback(
     (plotId: string) => {
       const target = plots.find((p) => p.id === plotId);
@@ -222,7 +228,106 @@ export default function MapHomeScreen() {
     setSelectedPlotId(id === selectedPlotId ? null : id);
   }
 
-  // ── Geojson for plots ───────────────────────────────────────────────────
+  const performLocateMe = useCallback(async () => {
+    if (hasPermission === false) {
+      Alert.alert(
+        'Location permission required',
+        'Enable location access in your device settings to use this feature.',
+      );
+      return;
+    }
+
+    setIsLocating(true);
+    try {
+      if (Platform.OS === 'android') {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          setHasPermission(false);
+          setIsLocating(false);
+          Alert.alert('Permission denied', 'Cannot get location without permission.');
+          return;
+        }
+        setHasPermission(true);
+      }
+
+      const watchId = Geolocation.watchPosition(
+        (position) => {
+          Geolocation.clearWatch(watchId);
+
+          const location: SimpleLocation = {
+            coords: {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+            },
+          };
+          setUserLocation(location);
+          setIsLocating(false);
+
+          if (cameraRef.current) {
+            cameraRef.current.flyTo({
+              center: [position.coords.longitude, position.coords.latitude],
+              zoom: 19,
+              duration: 800,
+            });
+          }
+        },
+        (error) => {
+          Geolocation.clearWatch(watchId);
+          setIsLocating(false);
+          Alert.alert(
+            'Cannot get location',
+            error.message || 'Try again outdoors with a clear view of the sky.',
+          );
+        },
+        {
+          enableHighAccuracy: true,
+          distanceFilter: 0,
+          interval: 2000,
+          fastestInterval: 1000,
+        },
+      );
+
+      setTimeout(() => {
+        Geolocation.clearWatch(watchId);
+        setIsLocating((prev) => {
+          if (prev) {
+            Alert.alert('Timeout', 'Could not get a GPS fix. Try moving outside.');
+          }
+          return false;
+        });
+      }, 60000);
+
+    } catch (err) {
+      setIsLocating(false);
+      Alert.alert('Error', err instanceof Error ? err.message : 'Unknown error');
+    }
+  }, [hasPermission]);
+
+  // Check if we already have permission on mount and auto-locate
+  useEffect(() => {
+    if (isBootstrapping || hasAutoLocated.current) return;
+
+    (async () => {
+      if (Platform.OS === 'android') {
+        try {
+          const alreadyGranted = await PermissionsAndroid.check(
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          );
+          if (alreadyGranted) {
+            setHasPermission(true);
+            hasAutoLocated.current = true;
+            void performLocateMe();
+          }
+        } catch (err) {
+          console.warn('Permission check failed', err);
+        }
+      }
+    })();
+  }, [isBootstrapping, performLocateMe]);
+
   const plotGeojson = {
     type: 'FeatureCollection',
     features: plots.map((p) => ({
@@ -237,9 +342,45 @@ export default function MapHomeScreen() {
     })),
   } as GeoJSON.FeatureCollection;
 
+  const userLocationGeojson = userLocation
+    ? ({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: { type: 'dot' },
+          geometry: {
+            type: 'Point',
+            coordinates: [
+              userLocation.coords.longitude,
+              userLocation.coords.latitude,
+            ],
+          },
+        },
+        ...(userLocation.coords.accuracy
+          ? [
+            {
+              type: 'Feature' as const,
+              properties: { type: 'accuracy' },
+              geometry: {
+                type: 'Polygon' as const,
+                coordinates: [
+                  createCircle(
+                    userLocation.coords.longitude,
+                    userLocation.coords.latitude,
+                    userLocation.coords.accuracy,
+                  ),
+                ],
+              },
+            },
+          ]
+          : []),
+      ],
+    } as GeoJSON.FeatureCollection)
+    : ({ type: 'FeatureCollection', features: [] } as GeoJSON.FeatureCollection);
+
   const selectedPlot = plots.find((p) => p.id === selectedPlotId);
 
-  // ── Dev menu actions ────────────────────────────────────────────────────
   async function handleForceDownload() {
     if (!isInternetReachable) {
       Alert.alert('Offline', 'You need internet to download.');
@@ -250,6 +391,7 @@ export default function MapHomeScreen() {
       await downloadCemeteryData();
       await loadLocalData();
       Alert.alert('Success', 'Data refreshed from Supabase.');
+      void performLocateMe();
     } catch (err) {
       Alert.alert('Download failed', err instanceof Error ? err.message : 'Unknown');
     } finally {
@@ -274,7 +416,34 @@ export default function MapHomeScreen() {
     }
   }
 
-  // ── Guards ──────────────────────────────────────────────────────────────
+  function handleGetDirections() {
+    if (!selectedPlot) return;
+
+    const coords =
+      selectedPlot.geometry.type === 'Polygon'
+        ? selectedPlot.geometry.coordinates[0]
+        : selectedPlot.geometry.coordinates[0][0];
+
+    if (coords.length === 0) {
+      Alert.alert('Error', 'This plot has no geometry.');
+      return;
+    }
+
+    const lngs = coords.map((c) => c[0]);
+    const lats = coords.map((c) => c[1]);
+    const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+
+    router.push({
+      pathname: '/directions',
+      params: {
+        destLng: centerLng.toString(),
+        destLat: centerLat.toString(),
+        plotIdentifier: selectedPlot.plot_identifier,
+      },
+    });
+  }
+
   if (!MAP_STYLE) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
@@ -313,7 +482,6 @@ export default function MapHomeScreen() {
     );
   }
 
-  // ── Main render ─────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       <Map style={styles.map} mapStyle={MAP_STYLE}>
@@ -343,9 +511,30 @@ export default function MapHomeScreen() {
             }}
           />
         </GeoJSONSource>
+
+        {userLocation && (
+          <GeoJSONSource id="user-location" data={userLocationGeojson}>
+            <Layer
+              type="fill"
+              id="user-accuracy"
+              filter={['==', ['get', 'type'], 'accuracy']}
+              paint={{ 'fill-color': '#2F81F7', 'fill-opacity': 0.15 }}
+            />
+            <Layer
+              type="circle"
+              id="user-dot"
+              filter={['==', ['get', 'type'], 'dot']}
+              paint={{
+                'circle-radius': 8,
+                'circle-color': '#2F81F7',
+                'circle-stroke-width': 3,
+                'circle-stroke-color': '#fff',
+              }}
+            />
+          </GeoJSONSource>
+        )}
       </Map>
 
-      {/* Top overlay: search bar + actions */}
       <SafeAreaView style={styles.topOverlay} edges={['top']} pointerEvents="box-none">
         <View style={styles.searchRow}>
           <View
@@ -388,7 +577,6 @@ export default function MapHomeScreen() {
           </Pressable>
         </View>
 
-        {/* Search results */}
         {searchVisible && query.trim().length > 0 && (
           <View
             style={[
@@ -433,7 +621,32 @@ export default function MapHomeScreen() {
         )}
       </SafeAreaView>
 
-      {/* Bottom overlay: selected plot info */}
+      <SafeAreaView
+        style={[styles.locateButtonContainer, { bottom: Spacing.four }]}
+        edges={['bottom']}
+        pointerEvents="box-none">
+        <Pressable
+          onPress={() => void performLocateMe()}
+          disabled={isLocating || hasPermission === false}
+          style={({ pressed }) => [
+            styles.locateButton,
+            {
+              backgroundColor: colors.backgroundElement,
+              borderColor: colors.border,
+              opacity:
+                hasPermission === false ? 0.4 : pressed ? 0.7 : isLocating ? 0.6 : 1,
+            },
+          ]}>
+          {isLocating ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <View style={styles.locateIcon}>
+              <View style={[styles.locateIconCenter, { backgroundColor: colors.primary }]} />
+            </View>
+          )}
+        </Pressable>
+      </SafeAreaView>
+
       {selectedPlot && (
         <SafeAreaView style={styles.bottomOverlay} edges={['bottom']} pointerEvents="box-none">
           <View
@@ -471,11 +684,21 @@ export default function MapHomeScreen() {
                 </View>
               ))
             )}
+
+            <Pressable
+              onPress={handleGetDirections}
+              style={[
+                styles.directionsBtn,
+                { backgroundColor: colors.primary },
+              ]}>
+              <Text style={{ color: colors.primaryText, fontWeight: '600', fontSize: 15 }}>
+                Get Directions
+              </Text>
+            </Pressable>
           </View>
         </SafeAreaView>
       )}
 
-      {/* Dev menu modal */}
       <Modal
         visible={showDevMenu}
         transparent
@@ -586,6 +809,27 @@ export default function MapHomeScreen() {
   );
 }
 
+function createCircle(
+  centerLng: number,
+  centerLat: number,
+  radiusMeters: number,
+  segments = 32,
+): [number, number][] {
+  const coords: [number, number][] = [];
+  const latDegrees = radiusMeters / 111320;
+  const lngDegrees =
+    radiusMeters / (111320 * Math.cos((centerLat * Math.PI) / 180));
+
+  for (let i = 0; i <= segments; i++) {
+    const angle = (i / segments) * 2 * Math.PI;
+    coords.push([
+      centerLng + lngDegrees * Math.cos(angle),
+      centerLat + latDegrees * Math.sin(angle),
+    ]);
+  }
+  return coords;
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
@@ -606,8 +850,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-
-  // Top overlay
   topOverlay: {
     position: 'absolute',
     top: 0,
@@ -662,8 +904,37 @@ const styles = StyleSheet.create({
   resultName: { fontSize: 15, fontWeight: '600' },
   resultMeta: { fontSize: 12, marginTop: 2 },
   emptyText: { fontSize: 14, fontStyle: 'italic', padding: Spacing.three, textAlign: 'center' },
-
-  // Bottom overlay
+  locateButtonContainer: {
+    position: 'absolute',
+    right: Spacing.four,
+  },
+  locateButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  locateIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#2F81F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locateIconCenter: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
   bottomOverlay: {
     position: 'absolute',
     bottom: 0,
@@ -688,8 +959,13 @@ const styles = StyleSheet.create({
   infoValue: { fontSize: 20, fontWeight: '700' },
   divider: { height: 1, marginVertical: Spacing.two },
   burialName: { fontSize: 16, fontWeight: '600' },
-
-  // Modal
+  directionsBtn: {
+    marginTop: Spacing.three,
+    paddingVertical: Spacing.three,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
